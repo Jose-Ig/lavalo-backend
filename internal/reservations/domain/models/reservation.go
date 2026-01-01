@@ -22,6 +22,7 @@ type Reservation struct {
 	UserID    uint              `gorm:"index;not null" json:"user_id"`
 	SlotID    uint              `gorm:"index;not null" json:"slot_id"`
 	AddressID uint              `gorm:"index;not null" json:"address_id"`
+	StartTime time.Time         `gorm:"not null;index" json:"start_time"`
 	Status    ReservationStatus `gorm:"type:varchar(20);default:'pending'" json:"status"`
 	Notes     string            `gorm:"type:text" json:"notes,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
@@ -34,3 +35,7 @@ func (Reservation) TableName() string {
 	return "reservations"
 }
 
+// IsActive returns true if the reservation is not cancelled or completed
+func (r *Reservation) IsActive() bool {
+	return r.Status == ReservationStatusPending || r.Status == ReservationStatusConfirmed
+}

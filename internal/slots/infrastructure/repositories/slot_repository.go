@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"context"
-	"time"
 
 	"github.com/Jose-Ig/lavalo-backend/internal/slots/domain/models"
 	"gorm.io/gorm"
@@ -38,13 +37,12 @@ func (r *SlotRepository) FindByID(ctx context.Context, id uint) (*models.Slot, e
 	return &slot, nil
 }
 
-// FindAvailable retrieves available slots within a time range
-func (r *SlotRepository) FindAvailable(ctx context.Context, startTime, endTime time.Time) ([]models.Slot, error) {
+// FindAvailable retrieves all available slots
+func (r *SlotRepository) FindAvailable(ctx context.Context) ([]models.Slot, error) {
 	var slots []models.Slot
 	if err := r.db.WithContext(ctx).
-		Where("is_available = ? AND start_time >= ? AND end_time <= ?", true, startTime, endTime).
-		Where("current_load < max_capacity").
-		Order("start_time ASC").
+		Where("is_available = ?", true).
+		Order("id ASC").
 		Find(&slots).Error; err != nil {
 		return nil, err
 	}
@@ -65,4 +63,3 @@ func (r *SlotRepository) Update(ctx context.Context, slot *models.Slot) error {
 func (r *SlotRepository) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&models.Slot{}, id).Error
 }
-
