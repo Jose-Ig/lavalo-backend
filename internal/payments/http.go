@@ -51,6 +51,7 @@ func Register(r *gin.RouterGroup, s *Service) {
 	}
 	r.POST("/reservations/:id/checkout", handle(true))
 	r.GET("/reservations/:id/payment", handle(false))
+	r.POST("/payments/webhook", s.webhook)
 	r.GET("/payments/return", func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 		c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")

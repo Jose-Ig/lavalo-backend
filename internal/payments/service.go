@@ -127,5 +127,11 @@ func (s *Service) Status(ctx context.Context, id uint, token string) (View, erro
 	if err := s.DB.WithContext(ctx).Where("reservation_id = ?", id).First(&c).Error; err != nil {
 		return View{}, err
 	}
-	return s.view(ctx, c, false)
+	if err := s.Reconcile(ctx, c); err != nil {
+		return View{}, err
+	}
+	if err := s.DB.WithContext(ctx).First(&c, c.ID).Error; err != nil {
+		return View{}, err
+	}
+	return s.view(ctx, c, true)
 }

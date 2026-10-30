@@ -29,3 +29,12 @@ No se crean aplicaciones, credenciales, usuarios ni webhooks en la cuenta durant
 
 Fuentes: https://www.mercadopago.com/developers/es/docs/checkout-pro-preferences/create-payment-preference
 https://www.mercadopago.com/developers/es/docs/checkout-pro-preferences/mobile-integration/react-native-expo-go
+
+## Operación del backend
+Se usan endpoints REST oficiales mediante net/http, con timeout, sin reintentos automáticos de POST.
+Si la respuesta de creación se pierde, el intento permanece `creating`: consultar Mercado Pago por su referencia
+antes de cualquier reparación manual. No borrar el intento y volver a cobrar sin verificarlo.
+La reconciliación consulta pagos cada minuto (20 intentos por ciclo, ordenados por última consulta).
+Una respuesta `verified=false` nunca habilita la pantalla de éxito; GET payment reconcilia antes de responder.
+`review` requiere intervención del negocio; no se ejecutan devoluciones ni se confirman reservas tardías.
+Para reducir pagos tardíos se excluyen ticket/ATM; medios asíncronos restantes siguen sujetos a revisión.

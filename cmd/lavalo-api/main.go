@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"github.com/Jose-Ig/lavalo-backend/internal/bookings"
@@ -92,6 +93,11 @@ func main() {
 
 	// Register routes
 	setupRoutes(router, db)
+
+	// Background provider reconciliation; no account configuration is performed.
+	paymentCtx, cancelPayments := context.WithCancel(context.Background())
+	defer cancelPayments()
+	go payments.New(db, payments.ConfigFromEnv()).RunReconciler(paymentCtx)
 
 	// Start server
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
@@ -192,8 +198,10 @@ func setupRoutes(router *gin.Engine, db *gorm.DB) {
 		bookings.Register(v1, bookings.New(db))
 		payments.Register(v1, payments.New(db, payments.ConfigFromEnv()))
 
-		// Unimplemented payment/admin endpoints must never report successful operations.
-		v1.Any("/payments", func(c *gin.Context) { c.JSON(501, gin.H{"error": "MercadoPago integration pending"}) })
+		// Payments are scoped to authorized reservations. The old collection endpoint is intentionally unsupported.
+		v1.Any("/payments", func(c *gin.Context) {
+			c.JSON(501, gin.H{"error": "Use /reservations/:id/checkout or /reservations/:id/payment"})
+		})
 
 		// Debug endpoints
 		debug := v1.Group("/_debug")
