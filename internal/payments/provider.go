@@ -17,7 +17,7 @@ import (
 
 var ErrUnavailable = errors.New("checkout temporarily unavailable")
 var ErrConflict = errors.New("reservation cannot be paid")
-var ErrMismatch = errors.New("provider payment does not match checkout")
+var ErrMismatch = errors.New("provider order does not match checkout")
 
 type Config struct {
 	Enabled       bool
@@ -33,31 +33,36 @@ func ConfigFromEnv() Config {
 	return Config{Enabled: os.Getenv("MP_ENABLED") == "true", LiveMode: os.Getenv("MP_LIVE_MODE") == "true", AccessToken: os.Getenv("MP_ACCESS_TOKEN"), WebhookSecret: os.Getenv("MP_WEBHOOK_SECRET"), CollectorID: id, PublicURL: strings.TrimRight(os.Getenv("MP_PUBLIC_BASE_URL"), "/")}
 }
 func (c Config) Ready() bool {
-	u, err := url.Parse(c.PublicURL)
-	return c.Enabled && c.AccessToken != "" && c.WebhookSecret != "" && c.CollectorID > 0 && err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
+	u, e := url.Parse(c.PublicURL)
+	return c.Enabled && c.AccessToken != "" && c.WebhookSecret != "" && c.CollectorID > 0 && e == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
 }
 
-type Preference struct {
-	ID         string `json:"id"`
-	URL        string `json:"init_point"`
-	SandboxURL string `json:"sandbox_init_point"`
-}
-type ProviderPayment struct {
-	ID          int64       `json:"id"`
-	Reference   string      `json:"external_reference"`
-	Amount      json.Number `json:"transaction_amount"`
-	Refunded    json.Number `json:"transaction_amount_refunded"`
-	Currency    string      `json:"currency_id"`
-	CollectorID int64       `json:"collector_id"`
-	LiveMode    bool        `json:"live_mode"`
-	Status      string      `json:"status"`
-	Detail      string      `json:"status_detail"`
-	UpdatedAt   time.Time   `json:"date_last_updated"`
+// Order follows Checkout Pro Orders, not the Payments or merchant_orders API.
+// Orders does not always return live_mode; the documented ORDTST ID identifies test orders.
+type Order struct {
+	ID             string    `json:"id"`
+	Type           string    `json:"type"`
+	ProcessingMode string    `json:"processing_mode"`
+	Reference      string    `json:"external_reference"`
+	Amount         string    `json:"total_amount"`
+	PaidAmount     string    `json:"total_paid_amount"`
+	Currency       string    `json:"currency"`
+	SellerID       string    `json:"user_id"`
+	LiveMode       *bool     `json:"live_mode,omitempty"`
+	Status         string    `json:"status"`
+	Detail         string    `json:"status_detail"`
+	UpdatedAt      time.Time `json:"last_updated_date"`
+	URL            string    `json:"checkout_url"`
+	Transactions   struct {
+		Payments []struct {
+			Status string `json:"status"`
+			Detail string `json:"status_detail"`
+		} `json:"payments"`
+	} `json:"transactions"`
 }
 type Gateway interface {
-	CreatePreference(context.Context, Checkout) (Preference, error)
-	GetPayment(context.Context, string) (ProviderPayment, error)
-	SearchPayments(context.Context, string) ([]ProviderPayment, error)
+	CreateOrder(context.Context, Checkout) (Order, error)
+	GetOrder(context.Context, string) (Order, error)
 }
 type MercadoPago struct {
 	Config Config
@@ -68,79 +73,88 @@ func NewGateway(c Config) *MercadoPago {
 	return &MercadoPago{Config: c, HTTP: &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
 
-// API errors deliberately omit response bodies: they can contain buyer data or secrets.
-func (m *MercadoPago) request(ctx context.Context, method, path string, body any, out any) error {
-	var payload bytes.Buffer
-	if body != nil {
-		if err := json.NewEncoder(&payload).Encode(body); err != nil {
-			return err
-		}
-	}
-	req, err := http.NewRequestWithContext(ctx, method, "https://api.mercadopago.com"+path, &payload)
-	if err != nil {
-		return err
+// No provider response bodies in errors: these may contain private buyer information.
+func (m *MercadoPago) request(ctx context.Context, method, path string, body []byte, key string, out any) error {
+	req, e := http.NewRequestWithContext(ctx, method, "https://api.mercadopago.com"+path, bytes.NewReader(body))
+	if e != nil {
+		return e
 	}
 	req.Header.Set("Authorization", "Bearer "+m.Config.AccessToken)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := m.HTTP.Do(req)
-	if err != nil {
+	if key != "" {
+		req.Header.Set("X-Idempotency-Key", key)
+	}
+	resp, e := m.HTTP.Do(req)
+	if e != nil {
 		return ErrUnavailable
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return ErrUnavailable
 	}
-	if err = json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(out); err != nil {
+	if e = json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(out); e != nil {
 		return ErrUnavailable
 	}
 	return nil
 }
-func (m *MercadoPago) CreatePreference(ctx context.Context, c Checkout) (Preference, error) {
-	ret := m.Config.PublicURL + "/api/v1/payments/return"
-	amount := json.Number(fmt.Sprintf("%d.%02d", c.AmountCents/100, c.AmountCents%100))
+func (m *MercadoPago) CreateOrder(ctx context.Context, c Checkout) (Order, error) {
+	var o Order
+	if c.API != "orders" || c.IdempotencyKey == "" || !json.Valid([]byte(c.RequestBody)) {
+		return o, ErrMismatch
+	}
+	e := m.request(ctx, http.MethodPost, "/v1/orders", []byte(c.RequestBody), c.IdempotencyKey, &o)
+	return o, e
+}
+func (m *MercadoPago) GetOrder(ctx context.Context, id string) (Order, error) {
+	var o Order
+	if !validOrderID(id) {
+		return o, ErrMismatch
+	}
+	e := m.request(ctx, http.MethodGet, "/v1/orders/"+strings.ToUpper(id), nil, "", &o)
+	return o, e
+}
+func validOrderID(id string) bool {
+	id = strings.ToUpper(id)
+	if !strings.HasPrefix(id, "ORD") || len(id) < 6 || len(id) > 100 {
+		return false
+	}
+	for _, c := range id {
+		if !(c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
+}
+func orderRequest(c Checkout, cfg Config, now time.Time) (string, error) {
+	// Persist the exact bytes once. Relative expiry MUST NOT change when replaying an idempotent request.
+	seconds := int64(c.ExpiresAt.Sub(now) / time.Second)
+	if seconds <= 0 {
+		return "", ErrConflict
+	}
+	amount := fmt.Sprintf("%d.%02d", c.AmountCents/100, c.AmountCents%100)
+	ret := cfg.PublicURL + "/api/v1/payments/return"
 	body := map[string]any{
-		"items":              []any{map[string]any{"id": strconv.FormatUint(uint64(c.ReservationID), 10), "title": "Reserva Uash", "quantity": 1, "unit_price": amount, "currency_id": c.Currency}},
-		"external_reference": c.Reference,
-		"back_urls":          map[string]string{"success": ret, "pending": ret, "failure": ret}, "auto_return": "approved",
-		"notification_url": m.Config.PublicURL + "/api/v1/payments/webhook",
-		"expires":          true, "expiration_date_to": c.ExpiresAt.Format(time.RFC3339),
-		// Offline methods can settle after the ten-minute slot hold. Keep this release synchronous.
-		"payment_methods": map[string]any{"excluded_payment_types": []any{map[string]string{"id": "ticket"}, map[string]string{"id": "atm"}}},
+		"type": "online", "processing_mode": "manual", "capture_mode": "automatic",
+		"total_amount": amount, "external_reference": c.Reference, "expiration_time": fmt.Sprintf("PT%dS", seconds),
+		"items": []any{map[string]any{"title": "Reserva Uash", "quantity": 1, "unit_price": amount}},
+		"config": map[string]any{
+			"online":         map[string]any{"success_url": ret, "failure_url": ret, "pending_url": ret, "auto_return": "approved", "retries": map[string]bool{"allowed": true}},
+			"payment_method": map[string]any{"not_allowed_types": []string{"ticket", "atm"}},
+		},
 	}
-	var p Preference
-	err := m.request(ctx, http.MethodPost, "/checkout/preferences", body, &p)
-	return p, err
+	b, e := json.Marshal(body)
+	return string(b), e
 }
-func (m *MercadoPago) GetPayment(ctx context.Context, id string) (ProviderPayment, error) {
-	var p ProviderPayment
-	if _, err := strconv.ParseUint(id, 10, 64); err != nil {
-		return p, ErrMismatch
+func validateOrder(o Order, c Checkout, cfg Config) error {
+	amount, e := moneyCents(json.Number(o.Amount))
+	if e != nil || !validOrderID(o.ID) || o.Type != "online" || o.ProcessingMode != "manual" || o.Reference != c.Reference || amount != c.AmountCents || o.Currency != c.Currency || o.SellerID != strconv.FormatInt(cfg.CollectorID, 10) || c.SellerID != o.SellerID || c.LiveMode != cfg.LiveMode || o.UpdatedAt.IsZero() {
+		return ErrMismatch
 	}
-	err := m.request(ctx, http.MethodGet, "/v1/payments/"+id, nil, &p)
-	return p, err
-}
-func (m *MercadoPago) SearchPayments(ctx context.Context, ref string) ([]ProviderPayment, error) {
-	var all []ProviderPayment
-	for offset := 0; offset < 1000; offset += 100 {
-		var page struct {
-			Results []ProviderPayment `json:"results"`
-			Paging  struct {
-				Total int `json:"total"`
-			} `json:"paging"`
-		}
-		path := "/v1/payments/search?external_reference=" + url.QueryEscape(ref) + "&limit=100&offset=" + strconv.Itoa(offset)
-		if err := m.request(ctx, http.MethodGet, path, nil, &page); err != nil {
-			return nil, err
-		}
-		all = append(all, page.Results...)
-		if offset+len(page.Results) >= page.Paging.Total {
-			return all, nil
-		}
-		if len(page.Results) == 0 {
-			return nil, ErrUnavailable
-		}
+	isTest := strings.HasPrefix(strings.ToUpper(o.ID), "ORDTST")
+	if isTest == cfg.LiveMode || (o.LiveMode != nil && *o.LiveMode != cfg.LiveMode) {
+		return ErrMismatch
 	}
-	return nil, ErrUnavailable
+	return nil
 }
 
 // moneyCents parses decimal JSON without binary floating point or rounding.

@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -19,7 +20,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// VerifySignature binds the URL payment ID and request ID using MP's documented HMAC manifest.
+// VerifySignature binds the URL order ID and request ID using MP's documented HMAC manifest.
 // No timestamp cutoff: delayed provider retries remain valid and processing is idempotent.
 func VerifySignature(r *http.Request, secret string) bool {
 	id := r.URL.Query().Get("data.id")
@@ -27,7 +28,7 @@ func VerifySignature(r *http.Request, secret string) bool {
 	if secret == "" || id == "" || requestID == "" {
 		return false
 	}
-	if _, err := strconv.ParseUint(id, 10, 64); err != nil {
+	if !validOrderID(id) {
 		return false
 	}
 	var ts, signature string
@@ -70,173 +71,196 @@ func (s *Service) webhook(c *gin.Context) {
 		c.Status(401)
 		return
 	}
-	// Never use the body data.id or resource URL; only fetch the signed numeric URL ID.
-	p, err := s.Gateway.GetPayment(c.Request.Context(), c.Query("data.id"))
-	if err == nil && strconv.FormatInt(p.ID, 10) != c.Query("data.id") {
-		err = ErrMismatch
-	}
-	if err == nil {
-		err = s.Apply(c.Request.Context(), p)
-	}
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if topic := c.Query("type"); topic != "" && topic != "order" {
 		c.Status(200)
 		return
-	} // Another integration's external reference.
-	if err != nil {
-		failure(c, err)
+	}
+	// Only the signed order ID is used; the redirect/body never authorizes a reservation.
+	id := strings.ToUpper(c.Query("data.id"))
+	o, e := s.Gateway.GetOrder(c.Request.Context(), id)
+	if e == nil && o.ID != id {
+		e = ErrMismatch
+	}
+	if e == nil {
+		e = s.Apply(c.Request.Context(), o)
+	}
+	if errors.Is(e, gorm.ErrRecordNotFound) {
+		c.Status(200)
+		return
+	}
+	if e != nil {
+		failure(c, e)
 		return
 	}
 	c.Status(200)
 }
 
-// Apply serializes against booking creation via the space row, then against cancellation via the reservation row.
-func (s *Service) Apply(ctx context.Context, p ProviderPayment) error {
+// Apply serializes with booking creation through the space row and with cancellation through the reservation row.
+func (s *Service) Apply(ctx context.Context, o Order) error {
 	var known Checkout
-	if err := s.DB.WithContext(ctx).Where("reference = ?", p.Reference).First(&known).Error; err != nil {
-		return err
+	if e := s.DB.WithContext(ctx).Where("reference = ?", o.Reference).First(&known).Error; e != nil {
+		return e
 	}
-	amount, err := moneyCents(p.Amount)
-	if err != nil || p.ID <= 0 || amount != known.AmountCents || p.Currency != known.Currency || p.CollectorID != s.Config.CollectorID || p.LiveMode != s.Config.LiveMode || p.UpdatedAt.IsZero() {
+	if known.API != "orders" {
 		return ErrMismatch
+	}
+	if e := validateOrder(o, known, s.Config); e != nil {
+		return e
+	}
+	if known.OrderID == nil {
+		return ErrUnavailable
+	} // Creation response not persisted yet: retry later.
+	if *known.OrderID != o.ID {
+		return ErrMismatch
+	}
+	state, issue := "pending", ""
+	switch o.Status {
+	case "created", "processing", "action_required":
+	case "failed":
+		state = "failed"
+	case "canceled":
+		state = "failed"
+		issue = "order_canceled"
+	case "processed":
+		if o.Detail == "partially_refunded" {
+			state = "review"
+			issue = "partial_refund"
+			break
+		}
+		if o.Detail != "accredited" {
+			state = "review"
+			issue = "unrecognized_order_status"
+			break
+		}
+		paid, e := moneyCents(json.Number(o.PaidAmount))
+		if e != nil || paid != known.AmountCents {
+			return ErrMismatch
+		}
+		state = "completed"
+	case "refunded", "charged_back":
+		state = "refunded"
+	default:
+		state = "review"
+		issue = "unrecognized_order_status"
+	}
+	// Fail closed on partial refunds/chargebacks visible in transactions even when the aggregate status lags.
+	for _, p := range o.Transactions.Payments {
+		if p.Status == "charged_back" || p.Status == "refunded" {
+			state = "refunded"
+		}
+		if p.Detail == "partially_refunded" {
+			state = "review"
+			issue = "partial_refund"
+		}
 	}
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var r reservation.Reservation
-		if err := tx.First(&r, known.ReservationID).Error; err != nil {
-			return err
+		if e := tx.First(&r, known.ReservationID).Error; e != nil {
+			return e
 		}
-		if err := tx.Model(&slot.Slot{}).Where("id = ?", r.SlotID).Update("updated_at", s.Now()).Error; err != nil {
-			return err
+		if e := tx.Model(&slot.Slot{}).Where("id = ?", r.SlotID).Update("updated_at", s.Now()).Error; e != nil {
+			return e
 		}
-		if err := tx.Model(&reservation.Reservation{}).Where("id = ?", r.ID).Update("updated_at", s.Now()).Error; err != nil {
-			return err
+		if e := tx.Model(&reservation.Reservation{}).Where("id = ?", r.ID).Update("updated_at", s.Now()).Error; e != nil {
+			return e
 		}
-		if err := tx.First(&r, r.ID).Error; err != nil {
-			return err
+		if e := tx.First(&r, r.ID).Error; e != nil {
+			return e
 		}
 		var checkout Checkout
-		if err := tx.First(&checkout, known.ID).Error; err != nil {
-			return err
+		if e := tx.First(&checkout, known.ID).Error; e != nil {
+			return e
 		}
-		id := strconv.FormatInt(p.ID, 10)
 		var receipt Receipt
-		err := tx.Where("provider_id = ?", id).First(&receipt).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
+		e := tx.Where("provider_id = ?", o.ID).First(&receipt).Error
+		if e != nil && !errors.Is(e, gorm.ErrRecordNotFound) {
+			return e
 		}
-		if err == nil {
+		if e == nil {
 			if receipt.CheckoutID != checkout.ID {
 				return ErrMismatch
 			}
-			if !p.UpdatedAt.After(receipt.ProviderUpdatedAt) {
+			if !o.UpdatedAt.After(receipt.ProviderUpdatedAt) {
 				return nil
 			}
 		} else {
-			receipt = Receipt{CheckoutID: checkout.ID, ProviderID: id}
+			receipt = Receipt{CheckoutID: checkout.ID, ProviderID: o.ID}
 		}
-		receipt.Status = p.Status
-		receipt.StatusDetail = p.Detail
-		receipt.ProviderUpdatedAt = p.UpdatedAt
-		// A partial refund must also block unqualified confirmation.
-		if p.Refunded != "" {
-			refunded, e := moneyCents(p.Refunded)
-			if e != nil {
-				return e
-			}
-			if refunded > 0 && p.Status == "approved" {
-				receipt.Status = "partially_refunded"
-			}
+		receipt.Status = o.Status
+		receipt.StatusDetail = o.Detail
+		receipt.ProviderUpdatedAt = o.UpdatedAt
+		if e := tx.Save(&receipt).Error; e != nil {
+			return e
 		}
-		if err := tx.Save(&receipt).Error; err != nil {
-			return err
-		}
-		var receipts []Receipt
-		if err := tx.Where("checkout_id = ?", checkout.ID).Find(&receipts).Error; err != nil {
-			return err
-		}
-		approved, refunded, failed, pending := 0, 0, 0, 0
-		for _, v := range receipts {
-			switch v.Status {
-			case "approved":
-				approved++
-			case "refunded", "charged_back", "partially_refunded":
-				refunded++
-			case "rejected", "cancelled":
-				failed++
-			default:
-				pending++
-			}
-		}
-		state, issue := "pending", ""
-		switch {
-		case checkout.State == "review":
+		// Business reviews (late/partial/unknown) need human resolution, never a later redirect.
+		if checkout.State == "review" {
 			state = "review"
 			issue = checkout.Issue
-		case refunded > 0:
-			state = "refunded"
-			if approved > 0 {
-				state = "review"
-				issue = "multiple_payments"
-			}
+		}
+		if state == "refunded" || issue == "partial_refund" {
 			if r.Status == "confirmed" {
 				r.Status = "cancelled"
 			} else if r.Status == "completed" {
 				state = "review"
 				issue = "refund_after_service"
 			}
-		case approved > 1:
-			state = "review"
-			issue = "multiple_payments"
-		case approved == 1:
-			if r.Status == "confirmed" || r.Status == "completed" {
-				state = "completed"
-				break
-			}
-			if r.Status != "pending" || r.ExpiresAt == nil || !s.Now().Before(*r.ExpiresAt) {
+		}
+		if state == "completed" {
+			switch r.Status {
+			case "confirmed", "completed":
+			case "pending":
+				if r.ExpiresAt == nil || !s.Now().Before(*r.ExpiresAt) {
+					state = "review"
+					issue = "late_payment"
+					break
+				}
+				var overlaps int64
+				e := tx.Model(&reservation.Reservation{}).Where("id <> ? AND slot_id = ? AND start_time < ? AND end_time > ?", r.ID, r.SlotID, r.EndTime, r.StartTime).Where("status = ? OR (status = ? AND (expires_at IS NULL OR expires_at > ?))", "confirmed", "pending", s.Now()).Count(&overlaps).Error
+				if e != nil {
+					return e
+				}
+				if overlaps > 0 {
+					state = "review"
+					issue = "slot_unavailable"
+					break
+				}
+				r.Status = "confirmed"
+				r.ExpiresAt = nil
+			default:
 				state = "review"
 				issue = "late_payment"
-				break
 			}
-			var overlaps int64
-			err := tx.Model(&reservation.Reservation{}).Where("id <> ? AND slot_id = ? AND start_time < ? AND end_time > ?", r.ID, r.SlotID, r.EndTime, r.StartTime).Where("status = ? OR (status = ? AND (expires_at IS NULL OR expires_at > ?))", "confirmed", "pending", s.Now()).Count(&overlaps).Error
-			if err != nil {
-				return err
-			}
-			if overlaps > 0 {
-				state = "review"
-				issue = "slot_unavailable"
-				break
-			}
-			r.Status = "confirmed"
-			r.ExpiresAt = nil
-			state = "completed"
-		case failed > 0 && pending == 0:
-			state = "failed"
 		}
-		if err := tx.Model(&r).Updates(map[string]any{"status": r.Status, "expires_at": r.ExpiresAt}).Error; err != nil {
-			return err
+		if e := tx.Model(&r).Updates(map[string]any{"status": r.Status, "expires_at": r.ExpiresAt}).Error; e != nil {
+			return e
 		}
 		return tx.Model(&checkout).Updates(map[string]any{"state": state, "issue": issue}).Error
 	})
 }
-
 func (s *Service) Reconcile(ctx context.Context, c Checkout) error {
 	if !s.Config.Ready() {
 		return ErrUnavailable
 	}
-	payments, err := s.Gateway.SearchPayments(ctx, c.Reference)
-	if err != nil {
-		return err
+	if c.API != "orders" {
+		return nil
 	}
-	for _, p := range payments {
-		// Search is authenticated but check the reference again before processing.
-		if p.Reference != c.Reference {
-			return ErrMismatch
-		}
-		if err = s.Apply(ctx, p); err != nil {
-			return err
-		}
+	if c.SellerID != strconv.FormatInt(s.Config.CollectorID, 10) || c.LiveMode != s.Config.LiveMode {
+		return ErrMismatch
 	}
-	return nil
+	if c.OrderID == nil {
+		if !s.Now().Before(c.ExpiresAt) {
+			return nil
+		}
+		return s.ensureOrder(ctx, &c)
+	}
+	o, e := s.Gateway.GetOrder(ctx, *c.OrderID)
+	if e != nil {
+		return e
+	}
+	if o.ID != *c.OrderID {
+		return ErrMismatch
+	}
+	return s.Apply(ctx, o)
 }
 
 // RunReconciler repairs missed webhooks, including later refunds, without exposing private jobs over HTTP.
@@ -253,7 +277,7 @@ func (s *Service) RunReconciler(ctx context.Context) {
 		case <-ticker.C:
 		}
 		var batch []Checkout
-		if err := s.DB.WithContext(ctx).Order("COALESCE(reconciled_at, created_at) ASC").Limit(20).Find(&batch).Error; err != nil {
+		if err := s.DB.WithContext(ctx).Where("api = ?", "orders").Order("COALESCE(reconciled_at, created_at) ASC").Limit(20).Find(&batch).Error; err != nil {
 			log.Print("checkout reconciliation: database unavailable")
 			continue
 		}
