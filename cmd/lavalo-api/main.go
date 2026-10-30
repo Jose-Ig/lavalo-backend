@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/Jose-Ig/lavalo-backend/internal/bookings"
+	"github.com/Jose-Ig/lavalo-backend/internal/payments"
 	"log"
 	"net/http"
 	"os"
@@ -162,6 +163,8 @@ func runMigrations(db *gorm.DB) error {
 		&slotModels.Slot{},
 		&addressModels.Address{},
 		&paymentModels.Payment{},
+		&payments.Checkout{},
+		&payments.Receipt{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
