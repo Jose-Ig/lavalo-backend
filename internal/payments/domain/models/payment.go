@@ -34,4 +34,3 @@ type Payment struct {
 func (Payment) TableName() string {
 	return "payments"
 }
-

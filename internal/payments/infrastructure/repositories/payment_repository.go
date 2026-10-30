@@ -55,4 +55,3 @@ func (r *PaymentRepository) Create(ctx context.Context, payment *models.Payment)
 func (r *PaymentRepository) Update(ctx context.Context, payment *models.Payment) error {
 	return r.db.WithContext(ctx).Save(payment).Error
 }
-

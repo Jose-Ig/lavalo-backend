@@ -190,6 +190,7 @@ func setupRoutes(router *gin.Engine, db *gorm.DB) {
 
 		// Register domain handlers
 		bookings.Register(v1, bookings.New(db))
+		payments.Register(v1, payments.New(db, payments.ConfigFromEnv()))
 
 		// Unimplemented payment/admin endpoints must never report successful operations.
 		v1.Any("/payments", func(c *gin.Context) { c.JSON(501, gin.H{"error": "MercadoPago integration pending"}) })

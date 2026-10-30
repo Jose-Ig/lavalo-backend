@@ -61,4 +61,3 @@ func (h *PaymentHandler) Webhook(c *gin.Context) {
 		"message": "webhook received",
 	})
 }
-
