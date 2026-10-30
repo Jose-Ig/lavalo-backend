@@ -80,4 +80,3 @@ func (h *SlotHandler) Delete(c *gin.Context) {
 	// TODO: Implement delete slot
 	c.JSON(http.StatusNoContent, nil)
 }
-

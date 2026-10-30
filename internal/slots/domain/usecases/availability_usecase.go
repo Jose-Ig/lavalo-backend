@@ -12,9 +12,9 @@ import (
 
 const (
 	// Business hours configuration
-	startHour = 8
-	endHour   = 22
-	stepMins  = 30
+	startHour = 9
+	endHour   = 21
+	stepMins  = 15
 	daysAhead = 7
 )
 
@@ -41,7 +41,11 @@ func NewAvailabilityUseCase(repo AvailabilityRepository) *AvailabilityUseCase {
 // GetWeekAvailability returns availability for the next 7 days
 func (uc *AvailabilityUseCase) GetWeekAvailability(ctx context.Context) (models.AvailabilityResponse, error) {
 	// Get today's date at midnight (local time)
-	now := time.Now()
+	loc, err := time.LoadLocation("America/Argentina/Cordoba")
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().In(loc)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
 	// Calculate date range: today -> today + 7 days
@@ -146,17 +150,25 @@ func buildReservationMap(reservations []reservationModels.Reservation) map[strin
 			continue
 		}
 
-		dateKey := r.StartTime.Format("2006-01-02")
-		hourKey := r.StartTime.Format("15:04")
-
-		if result[dateKey] == nil {
-			result[dateKey] = make(map[uint]map[string]bool)
+		loc, _ := time.LoadLocation("America/Argentina/Cordoba")
+		start := r.StartTime.In(loc)
+		end := r.EndTime.In(loc)
+		if !end.After(start) {
+			end = start.Add(30 * time.Minute)
+		} // Legacy reservations.
+		if r.Status == reservationModels.ReservationStatusPending && r.ExpiresAt != nil && !r.ExpiresAt.After(time.Now()) {
+			continue
 		}
-		if result[dateKey][r.SlotID] == nil {
-			result[dateKey][r.SlotID] = make(map[string]bool)
+		for cursor := start; cursor.Before(end); cursor = cursor.Add(stepMins * time.Minute) {
+			dateKey, hourKey := cursor.Format("2006-01-02"), cursor.Format("15:04")
+			if result[dateKey] == nil {
+				result[dateKey] = make(map[uint]map[string]bool)
+			}
+			if result[dateKey][r.SlotID] == nil {
+				result[dateKey][r.SlotID] = make(map[string]bool)
+			}
+			result[dateKey][r.SlotID][hourKey] = true
 		}
-
-		result[dateKey][r.SlotID][hourKey] = true
 	}
 
 	return result
@@ -172,4 +184,3 @@ func isReserved(reservedMap map[string]map[uint]map[string]bool, date string, sl
 	}
 	return reservedMap[date][slotID][hour]
 }
-

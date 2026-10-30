@@ -22,4 +22,3 @@ type HourAvailability struct {
 	Value       string `json:"value"`
 	IsAvailable bool   `json:"is_available"`
 }
-

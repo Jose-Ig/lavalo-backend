@@ -56,4 +56,3 @@ func (h *AvailabilityHandler) GetAvailability(c *gin.Context) {
 
 	c.JSON(http.StatusOK, availability)
 }
-

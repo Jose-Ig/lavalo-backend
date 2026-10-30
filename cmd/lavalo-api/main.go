@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/Jose-Ig/lavalo-backend/internal/bookings"
 	"log"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"go.uber.org/zap"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
@@ -21,10 +23,7 @@ import (
 	reservationModels "github.com/Jose-Ig/lavalo-backend/internal/reservations/domain/models"
 	slotModels "github.com/Jose-Ig/lavalo-backend/internal/slots/domain/models"
 
-	addressHttp "github.com/Jose-Ig/lavalo-backend/internal/addresses/application/http"
-	paymentHttp "github.com/Jose-Ig/lavalo-backend/internal/payments/application/http"
 	reservationHttp "github.com/Jose-Ig/lavalo-backend/internal/reservations/application/http"
-	slotHttp "github.com/Jose-Ig/lavalo-backend/internal/slots/application/http"
 
 	slotUsecases "github.com/Jose-Ig/lavalo-backend/internal/slots/domain/usecases"
 	slotRepos "github.com/Jose-Ig/lavalo-backend/internal/slots/infrastructure/repositories"
@@ -37,6 +36,7 @@ var dbPath string
 
 func main() {
 	// Parse command line flags
+	seedSlots := flag.Int("seed-slots", 0, "Create numbered development slots (debug mode only)")
 	migrateOnly := flag.Bool("migrate-only", false, "Run migrations and exit")
 	flag.Parse()
 
@@ -66,6 +66,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *seedSlots > 0 {
+		if cfg.Server.Mode != gin.DebugMode {
+			log.Fatal("seed-slots requires debug mode")
+		}
+		for id := 1; id <= *seedSlots; id++ {
+			sl := slotModels.Slot{ID: uint(id), Label: fmt.Sprintf("Espacio %d", id), IsAvailable: true}
+			if err := db.FirstOrCreate(&sl, uint(id)).Error; err != nil {
+				log.Fatal(err)
+			}
+		}
+	}
 	// Exit if migrate-only flag is set
 	if *migrateOnly {
 		common.Logger.Info("Migrations completed successfully")
@@ -93,6 +104,13 @@ func main() {
 
 // initDatabase initializes the SQLite database connection
 func initDatabase(cfg *common.Config) (*gorm.DB, error) {
+	if url := os.Getenv("DATABASE_URL"); url != "" {
+		return gorm.Open(postgres.Open(url), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
+	}
+	if cfg.Server.Mode == gin.ReleaseMode {
+		return nil, fmt.Errorf("DATABASE_URL is required in release mode")
+	}
+
 	// Set default DSN if empty
 	dsn := cfg.Database.DSN
 	if dsn == "" {
@@ -168,22 +186,17 @@ func setupRoutes(router *gin.Engine, db *gorm.DB) {
 		v1.GET("/availability", availabilityHandler.GetAvailability)
 
 		// Register domain handlers
-		reservationHandler := reservationHttp.NewReservationHandler()
-		reservationHandler.RegisterRoutes(v1)
+		bookings.Register(v1, bookings.New(db))
 
-		slotHandler := slotHttp.NewSlotHandler()
-		slotHandler.RegisterRoutes(v1)
-
-		addressHandler := addressHttp.NewAddressHandler()
-		addressHandler.RegisterRoutes(v1)
-
-		paymentHandler := paymentHttp.NewPaymentHandler()
-		paymentHandler.RegisterRoutes(v1)
+		// Unimplemented payment/admin endpoints must never report successful operations.
+		v1.Any("/payments", func(c *gin.Context) { c.JSON(501, gin.H{"error": "MercadoPago integration pending"}) })
 
 		// Debug endpoints
 		debug := v1.Group("/_debug")
 		{
-			debug.GET("/db", DebugDBHandler(db))
+			if gin.Mode() == gin.DebugMode {
+				debug.GET("/db", DebugDBHandler(db))
+			}
 		}
 	}
 }

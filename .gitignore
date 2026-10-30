@@ -1,0 +1,5 @@
+.env
+.env.local
+data/
+*.db-shm
+*.db-wal

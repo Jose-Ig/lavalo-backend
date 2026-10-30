@@ -39,7 +39,7 @@ func (r *AvailabilityRepository) FindReservationsByDateRange(ctx context.Context
 
 	// Get reservations that are pending or confirmed within the date range
 	if err := r.db.WithContext(ctx).
-		Where("start_time >= ? AND start_time < ?", start, end).
+		Where("start_time < ? AND (end_time > ? OR (end_time IS NULL AND start_time >= ?))", end, start, start).
 		Where("status IN ?", []string{
 			string(reservationModels.ReservationStatusPending),
 			string(reservationModels.ReservationStatusConfirmed),
@@ -50,4 +50,3 @@ func (r *AvailabilityRepository) FindReservationsByDateRange(ctx context.Context
 
 	return reservations, nil
 }
-

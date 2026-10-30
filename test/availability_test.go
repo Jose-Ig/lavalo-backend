@@ -79,7 +79,7 @@ func TestGetWeekAvailability_AllAvailable(t *testing.T) {
 	}
 
 	// Should have 28 hours (8:00-22:00, 30min intervals = 14 hours * 2)
-	expectedHours := 28
+	expectedHours := 48
 	if len(dayAvail.Hours) != expectedHours {
 		t.Errorf("expected %d hours, got %d", expectedHours, len(dayAvail.Hours))
 	}
@@ -94,7 +94,7 @@ func TestGetWeekAvailability_AllAvailable(t *testing.T) {
 
 func TestGetWeekAvailability_WithReservations(t *testing.T) {
 	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
+	today := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, now.Location())
 
 	repo := &mockAvailabilityRepository{
 		slots: []models.Slot{
@@ -123,7 +123,7 @@ func TestGetWeekAvailability_WithReservations(t *testing.T) {
 
 	// First hour (08:00) should still be available because slot 2 is free
 	firstHour := dayAvail.Hours[0]
-	if firstHour.Value != "08:00" {
+	if firstHour.Value != "09:00" {
 		t.Errorf("first hour should be 08:00, got %s", firstHour.Value)
 	}
 	if !firstHour.IsAvailable {
@@ -141,7 +141,7 @@ func TestGetWeekAvailability_WithReservations(t *testing.T) {
 
 func TestGetWeekAvailability_HourBlockedWhenAllSlotsReserved(t *testing.T) {
 	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
+	today := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, now.Location())
 
 	repo := &mockAvailabilityRepository{
 		slots: []models.Slot{
@@ -181,7 +181,7 @@ func TestGetWeekAvailability_HourBlockedWhenAllSlotsReserved(t *testing.T) {
 	}
 
 	// Second hour (08:30) should be available
-	secondHour := dayAvail.Hours[1]
+	secondHour := dayAvail.Hours[2]
 	if !secondHour.IsAvailable {
 		t.Error("08:30 should be available")
 	}
@@ -189,7 +189,7 @@ func TestGetWeekAvailability_HourBlockedWhenAllSlotsReserved(t *testing.T) {
 
 func TestGetWeekAvailability_CancelledReservationsIgnored(t *testing.T) {
 	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
+	today := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, now.Location())
 
 	repo := &mockAvailabilityRepository{
 		slots: []models.Slot{
@@ -221,4 +221,3 @@ func TestGetWeekAvailability_CancelledReservationsIgnored(t *testing.T) {
 		t.Error("08:00 should be available (cancelled reservation should be ignored)")
 	}
 }
-
