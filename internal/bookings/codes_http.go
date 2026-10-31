@@ -84,6 +84,46 @@ func RegisterCodeRoutes(r *gin.RouterGroup, s *Service) {
 			c.JSON(200, gin.H{"data": access})
 		}
 	}
+
+	reschedule := func(availability bool) gin.HandlerFunc {
+		return func(c *gin.Context) {
+			c.Header("Cache-Control", "no-store")
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2048)
+			var input struct {
+				Code      string    `json:"code"`
+				Date      string    `json:"date"`
+				StartTime time.Time `json:"start_time"`
+				SlotID    uint      `json:"slot_id"`
+			}
+			if c.ShouldBindJSON(&input) != nil || len(input.Code) > 64 || len(input.Date) > 10 {
+				c.JSON(400, gin.H{"error": "Revisá los datos del turno."})
+				return
+			}
+			var data any
+			var err error
+			if availability {
+				data, err = s.RescheduleAvailability(c.Request.Context(), input.Code, input.Date, input.StartTime)
+			} else {
+				data, err = s.Reschedule(c.Request.Context(), input.Code, input.Date, input.SlotID, input.StartTime)
+			}
+			if err != nil {
+				status, message := 500, "No pudimos cambiar el turno. Reintentá."
+				switch {
+				case errors.Is(err, gorm.ErrRecordNotFound):
+					status, message = 404, "No encontramos la reserva con ese código y fecha."
+				case errors.Is(err, ErrInvalid):
+					status, message = 400, "Elegí un turno futuro, dentro de los próximos 8 días y entre 09:00 y 21:00."
+				case errors.Is(err, ErrConflict):
+					status, message = 409, "El turno ya no está disponible o la reserva ya comenzó o fue validada. Actualizá la reserva y elegí otro turno."
+				}
+				c.JSON(status, gin.H{"error": message})
+				return
+			}
+			c.JSON(200, gin.H{"data": data})
+		}
+	}
+	r.POST("/reservations/reschedule/availability", limit, reschedule(true))
+	r.POST("/reservations/reschedule", limit, reschedule(false))
 	r.POST("/reservations/lookup", limit, handle(false))
 	r.POST("/reservations/verify-slot", limit, handle(true))
 }

@@ -74,3 +74,14 @@ Una colisión concurrente revierte la transacción y admite reintento. Los códi
 Consulta y QR reciben date (AAAA-MM-DD); si se omite, se usa hoy en Argentina. Nunca se busca un
 código corto en otros días. La app solicita la fecha y la conserva al escanear. El límite de intentos
 sigue vigente; para producción se requiere el limitador distribuido mencionado arriba.
+
+## Cambio de turno
+
+Una reserva confirmada se puede reprogramar antes de su inicio y sin QR validado. Se conserva
+la duración pagada, ID, contacto y checkout; la fecha/hora y el espacio se actualizan en una transacción.
+La disponibilidad excluye la propia reserva. La escritura bloquea los espacios y comprueba de nuevo
+los solapamientos. El turno anterior solo se libera si el cambio se guarda correctamente.
+El código se conserva al cambiar de día salvo colisión con otro código de ese día, en cuyo caso
+se genera otro y se muestra en la confirmación. El número visible refleja el nuevo horario.
+Consulta y QR deben usar la nueva fecha; el día anterior deja de aceptar el código corto.
+Los avisos siguen pendientes de proveedor; no se prometen SMS/WhatsApp de reprogramación reales.

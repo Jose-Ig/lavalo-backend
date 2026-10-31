@@ -115,6 +115,7 @@ func EnsureConfirmation(tx *gorm.DB, r *reservation.Reservation) error {
 }
 
 type ReservationAccess struct {
+	CanReschedule     bool                          `json:"can_reschedule"`
 	ReservationNumber string                        `json:"reservation_number"`
 	ReservationDate   string                        `json:"reservation_date"`
 	ID                uint                          `json:"id"`
@@ -187,7 +188,7 @@ func (s *Service) access(db *gorm.DB, r reservation.Reservation) (ReservationAcc
 	if r.QRVerifiedAt != nil {
 		activation = "awaiting_controller"
 	}
-	return ReservationAccess{ReservationNumber: r.Number(), ReservationDate: r.StartTime.In(Location).Format("2006-01-02"), ID: r.ID, Code: ConfirmationCode(r), SlotID: r.SlotID, SlotLabel: sl.Label, StartTime: r.StartTime, EndTime: r.EndTime, Duration: r.DurationMinutes, Status: r.Status, CanVerifyQR: reason == "ready", ActivationReason: reason, QRVerifiedAt: r.QRVerifiedAt, ActivationStatus: activation}, nil
+	return ReservationAccess{CanReschedule: s.canReschedule(r), ReservationNumber: r.Number(), ReservationDate: r.StartTime.In(Location).Format("2006-01-02"), ID: r.ID, Code: ConfirmationCode(r), SlotID: r.SlotID, SlotLabel: sl.Label, StartTime: r.StartTime, EndTime: r.EndTime, Duration: r.DurationMinutes, Status: r.Status, CanVerifyQR: reason == "ready", ActivationReason: reason, QRVerifiedAt: r.QRVerifiedAt, ActivationStatus: activation}, nil
 }
 func (s *Service) LookupCode(ctx context.Context, code string, dates ...string) (ReservationAccess, error) {
 	db := s.DB.WithContext(ctx)
@@ -238,6 +239,9 @@ func (s *Service) VerifySlotQR(ctx context.Context, code, qr string, dates ...st
 		}
 		if err = tx.First(&r, r.ID).Error; err != nil {
 			return err
+		}
+		if r.SlotID != slotID {
+			return ErrConflict
 		}
 		result, err = s.access(tx, r)
 		if err != nil {
