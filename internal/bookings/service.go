@@ -101,7 +101,7 @@ func (s *Service) Create(ctx context.Context, i Input) (*reservation.Reservation
 	if expiry.After(i.StartTime) {
 		expiry = i.StartTime
 	}
-	r := &reservation.Reservation{SlotID: i.SlotID, StartTime: i.StartTime.UTC(), EndTime: end.UTC(), DurationMinutes: i.Duration, Name: strings.TrimSpace(i.Name), Email: strings.TrimSpace(i.Email), WhatsAppOptIn: i.WhatsAppOptIn, Phone: i.Phone, VehiclePlate: strings.ToUpper(strings.TrimSpace(i.Plate)), VehicleModel: strings.TrimSpace(i.Model), AccessTokenHash: tokenHash(token), ExpiresAt: &expiry, Status: reservation.ReservationStatusPending}
+	r := &reservation.Reservation{SlotID: i.SlotID, StartTime: i.StartTime.UTC(), EndTime: end.UTC(), DurationMinutes: i.Duration, Name: strings.TrimSpace(i.Name), Email: strings.TrimSpace(i.Email), WhatsAppOptIn: true, Phone: i.Phone, VehiclePlate: strings.ToUpper(strings.TrimSpace(i.Plate)), VehicleModel: strings.TrimSpace(i.Model), AccessTokenHash: tokenHash(token), ExpiresAt: &expiry, Status: reservation.ReservationStatusPending}
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if i.SlotID == 0 {
 			candidates, err := s.lockAssignmentSlots(tx)

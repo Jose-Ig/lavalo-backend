@@ -56,8 +56,8 @@ func TestIndependentCodesAndIdempotentNotificationIntents(t *testing.T) {
 	}
 	var channels []string
 	s.DB.Model(&NotificationIntent{}).Order("channel").Pluck("channel", &channels)
-	if strings.Join(channels, ",") != "sms,whatsapp" {
-		t.Fatal("expected SMS plus WhatsApp, never email", channels)
+	if strings.Join(channels, ",") != "email,whatsapp" {
+		t.Fatal("expected WhatsApp plus optional email, never SMS", channels)
 	}
 	lookup, e := s.LookupCode(ctx, strings.ToLower(code))
 	if e != nil || lookup.ID != r.ID || lookup.CanVerifyQR {
@@ -148,7 +148,7 @@ func TestCodeEndpointLimitsGuesses(t *testing.T) {
 		}
 	}
 }
-func TestWhatsAppRequiresOptIn(t *testing.T) {
+func TestWhatsAppIsDefaultAndEmailIsOptional(t *testing.T) {
 	s, i := fixture(t)
 	s.DB.AutoMigrate(&NotificationIntent{})
 	i.Email = ""
@@ -165,11 +165,11 @@ func TestWhatsAppRequiresOptIn(t *testing.T) {
 	var n int64
 	s.DB.Model(&NotificationIntent{}).Count(&n)
 	if n != 1 {
-		t.Fatal("expected SMS by default", n)
+		t.Fatal("expected WhatsApp by default", n)
 	}
 	var intent NotificationIntent
-	if err := s.DB.First(&intent).Error; err != nil || intent.Channel != "sms" {
-		t.Fatal("expected only SMS without WhatsApp consent", intent.Channel, err)
+	if err := s.DB.First(&intent).Error; err != nil || intent.Channel != "whatsapp" {
+		t.Fatal("expected only WhatsApp without an email", intent.Channel, err)
 	}
 }
 
@@ -277,5 +277,42 @@ func TestShortCodeKeepsLeadingZeroAndLocalReservationNumber(t *testing.T) {
 	r.StartTime = time.Date(2026, 11, 1, 1, 30, 0, 0, time.UTC)
 	if r.Number() != "31102026-2230" {
 		t.Fatal("wrong Argentina date/time", r.Number())
+	}
+}
+
+func TestObsoletePendingSMSIsDisabledAndEmailRemainsOptional(t *testing.T) {
+	s, r, _ := confirmedFixture(t)
+	sms := NotificationIntent{ReservationID: r.ID, Channel: "sms", Status: "pending_configuration"}
+	if err := s.DB.Create(&sms).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.Transaction(func(tx *gorm.DB) error { return EnsureConfirmation(tx, r) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.First(&sms, sms.ID).Error; err != nil || sms.Status != "cancelled_channel_disabled" {
+		t.Fatal("obsolete SMS left queued", sms.Status, err)
+	}
+	var queued int64
+	s.DB.Model(&NotificationIntent{}).Where("status = ?", "pending_configuration").Count(&queued)
+	if queued != 2 {
+		t.Fatal("expected only WhatsApp and email pending", queued)
+	}
+}
+func TestOptionalEmailIsValidatedAndStored(t *testing.T) {
+	s, i := fixture(t)
+	for _, email := range []string{"not-an-email", "Name <guest@example.com>", "guest@example.com,other@example.com"} {
+		i.Email = email
+		if _, _, err := s.Create(context.Background(), i); !errors.Is(err, ErrInvalid) {
+			t.Fatal("invalid email accepted", err)
+		}
+	}
+	i.Email = "  guest@example.com  "
+	r, token, err := s.Create(context.Background(), i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.Get(context.Background(), r.ID, token)
+	if err != nil || stored.Email != "guest@example.com" || !stored.WhatsAppOptIn {
+		t.Fatal("email/default WhatsApp not persisted", err)
 	}
 }

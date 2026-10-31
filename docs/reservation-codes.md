@@ -28,11 +28,13 @@ Para probar la cámara se puede generar un QR con el texto exacto uash://slot/1 
 
 notification_intents conserva una intención por reserva/canal, con restricción única para evitar duplicados.
 Por ahora su estado es pending_configuration: NO hay dispatcher ni se envían mensajes automáticamente.
-SMS se prepara por defecto para el celular de cada reserva confirmada. WhatsApp se agrega únicamente
-con la casilla de consentimiento marcada; no reemplaza el SMS. El formulario solo solicita nombre y
-celular: no solicita email ni datos del vehículo. Los campos históricos se conservan en la base.
-Los intentos no guardan el código ni destinatario en texto: un futuro worker los obtiene desde la reserva.
-SMS y WhatsApp requieren integrar y configurar proveedores de mensajería antes de realizar envíos reales.
+WhatsApp se prepara por defecto para el celular de cada reserva confirmada. No se solicita una casilla.
+El formulario informa que el código se enviará por WhatsApp. Email es opcional y se suma como canal
+si se informa una dirección válida. No se generan nuevos avisos SMS y los SMS pendientes de la reserva
+consultada se marcan cancelled_channel_disabled. Los registros históricos se conservan.
+El formulario solicita nombre, celular y email opcional, sin datos del vehículo.
+Los intentos no guardan código ni destinatario en texto: un futuro worker los obtiene desde la reserva.
+WhatsApp y email requieren integrar sus proveedores antes de realizar envíos reales.
 No se deben marcar avisos como entregados hasta tener confirmación del proveedor.
 Los errores de mensajería no deben revertir un pago aprobado ni generar un código distinto al reintentar.
 
@@ -50,7 +52,7 @@ Reiniciar Metro con npx expo start --clear. Una development build anterior neces
 4. Consultar cualquiera de los códigos, incluso desde otro dispositivo conectado al mismo backend.
 5. Dentro del horario reservado, escanear el QR del espacio correcto; uno distinto debe rechazarse.
 6. La verificación termina en Espacio verificado, con activación física pendiente de integrar.
-Los envíos por SMS/WhatsApp quedan pendientes hasta elegir/configurar sus proveedores.
+Los envíos por WhatsApp/email quedan pendientes hasta elegir/configurar sus proveedores.
 
 ## Pago por Mercado Pago
 

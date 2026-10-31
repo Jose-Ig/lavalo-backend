@@ -100,10 +100,14 @@ func EnsureConfirmation(tx *gorm.DB, r *reservation.Reservation) error {
 	}
 	channels := []string{}
 	if r.Phone != "" {
-		channels = append(channels, "sms")
-	}
-	if r.WhatsAppOptIn && r.Phone != "" {
 		channels = append(channels, "whatsapp")
+	}
+	if strings.TrimSpace(r.Email) != "" {
+		channels = append(channels, "email")
+	}
+	// Keep historical records, but never leave unsent SMS queued for a future dispatcher.
+	if err := tx.Model(&NotificationIntent{}).Where("reservation_id = ? AND channel = ? AND status = ?", r.ID, "sms", "pending_configuration").Update("status", "cancelled_channel_disabled").Error; err != nil {
+		return err
 	}
 	for _, channel := range channels {
 		intent := NotificationIntent{ReservationID: r.ID, Channel: channel, Status: "pending_configuration"}
