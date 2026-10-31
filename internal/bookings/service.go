@@ -84,7 +84,11 @@ func (s *Service) busy(db *gorm.DB, id uint, start, end time.Time) (bool, error)
 	return count > 0, err
 }
 func (s *Service) Create(ctx context.Context, i Input) (*reservation.Reservation, string, error) {
-	if err := s.Validate(i); err != nil {
+	validation := i
+	if validation.SlotID == 0 {
+		validation.SlotID = 1
+	}
+	if err := s.Validate(validation); err != nil {
 		return nil, "", err
 	}
 	b := make([]byte, 32)
@@ -99,20 +103,32 @@ func (s *Service) Create(ctx context.Context, i Input) (*reservation.Reservation
 	}
 	r := &reservation.Reservation{SlotID: i.SlotID, StartTime: i.StartTime.UTC(), EndTime: end.UTC(), DurationMinutes: i.Duration, Name: strings.TrimSpace(i.Name), Email: strings.TrimSpace(i.Email), WhatsAppOptIn: i.WhatsAppOptIn, Phone: i.Phone, VehiclePlate: strings.ToUpper(strings.TrimSpace(i.Plate)), VehicleModel: strings.TrimSpace(i.Model), AccessTokenHash: tokenHash(token), ExpiresAt: &expiry, Status: reservation.ReservationStatusPending}
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// UPDATE takes a row lock in PostgreSQL and a writer lock in SQLite before checking conflicts.
-		result := tx.Model(&slot.Slot{}).Where("id = ? AND is_available = ?", i.SlotID, true).Update("updated_at", s.Now())
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return ErrConflict
-		}
-		busy, err := s.busy(tx, i.SlotID, r.StartTime, r.EndTime)
-		if err != nil {
-			return err
-		}
-		if busy {
-			return ErrConflict
+		if i.SlotID == 0 {
+			candidates, err := s.lockAssignmentSlots(tx)
+			if err != nil {
+				return err
+			}
+			chosen, err := s.chooseAssignment(tx, *r, candidates, i.StartTime)
+			if err != nil {
+				return err
+			}
+			r.SlotID = chosen
+		} else {
+			// Legacy callers may specify a space; mobile uses automatic assignment.
+			result := tx.Model(&slot.Slot{}).Where("id = ? AND is_available = ?", i.SlotID, true).Update("updated_at", s.Now())
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return ErrConflict
+			}
+			busy, err := s.busy(tx, i.SlotID, r.StartTime, r.EndTime)
+			if err != nil {
+				return err
+			}
+			if busy {
+				return ErrConflict
+			}
 		}
 		return tx.Create(r).Error
 	})

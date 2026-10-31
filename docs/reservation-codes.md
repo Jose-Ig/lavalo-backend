@@ -83,3 +83,13 @@ El código se conserva al cambiar de día salvo colisión con otro código de es
 se genera otro y se muestra en la confirmación. El número visible refleja el nuevo horario.
 Consulta y QR deben usar la nueva fecha; el día anterior deja de aceptar el código corto.
 Los avisos siguen pendientes de proveedor; no se prometen SMS/WhatsApp de reprogramación reales.
+
+## Asignación automática de espacio
+
+La app pide solo día, horario, duración y contacto. No envía slot_id al crear o reprogramar.
+El backend asigna un espacio habilitado libre durante todo el intervalo, dentro de la misma
+transacción que guarda la reserva. Bloquea los espacios en orden estable y vuelve a comprobar
+solapamientos, incluyendo retenciones pendientes vigentes. Si no queda lugar devuelve conflicto.
+En cambios de turno conserva el espacio actual si está disponible; de lo contrario asigna otro.
+El pago y la duración no cambian. El espacio definitivo aparece en la reserva guardada y se valida
+contra el QR del espacio asignado. La selección de espacio queda solo para clientes API anteriores.

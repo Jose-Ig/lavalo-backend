@@ -63,19 +63,28 @@ func (s *Service) Reschedule(ctx context.Context, code, date string, slotID uint
 	}
 	var result ReservationAccess
 	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Lock old and new spaces in a stable order, then the booking, like payment/QR operations.
-		ids := []uint{original.SlotID}
-		if slotID != original.SlotID {
-			ids = append(ids, slotID)
-		}
-		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-		for _, id := range ids {
-			locked := tx.Model(&slot.Slot{}).Where("id = ?", id).Update("updated_at", s.Now())
-			if locked.Error != nil {
-				return locked.Error
+		var candidates []slot.Slot
+		if slotID == 0 {
+			var err error
+			candidates, err = s.lockAssignmentSlots(tx)
+			if err != nil {
+				return err
 			}
-			if locked.RowsAffected != 1 {
-				return ErrConflict
+		} else {
+			// Lock old and new spaces in a stable order, then the booking, like payment/QR operations.
+			ids := []uint{original.SlotID}
+			if slotID != original.SlotID {
+				ids = append(ids, slotID)
+			}
+			sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+			for _, id := range ids {
+				locked := tx.Model(&slot.Slot{}).Where("id = ?", id).Update("updated_at", s.Now())
+				if locked.Error != nil {
+					return locked.Error
+				}
+				if locked.RowsAffected != 1 {
+					return ErrConflict
+				}
 			}
 		}
 		if err := tx.Model(&reservation.Reservation{}).Where("id = ?", original.ID).Update("updated_at", s.Now()).Error; err != nil {
@@ -87,6 +96,15 @@ func (s *Service) Reschedule(ctx context.Context, code, date string, slotID uint
 		}
 		if r.SlotID != original.SlotID || !s.canReschedule(r) {
 			return ErrConflict
+		}
+		if slotID == 0 {
+			if err = s.Validate(s.rescheduleInput(r, 1, start)); err != nil {
+				return err
+			}
+			slotID, err = s.chooseAssignment(tx, r, candidates, start)
+			if err != nil {
+				return err
+			}
 		}
 		if err = s.Validate(s.rescheduleInput(r, slotID, start)); err != nil {
 			return err
