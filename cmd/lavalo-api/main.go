@@ -169,6 +169,7 @@ func runMigrations(db *gorm.DB) error {
 		&slotModels.Slot{},
 		&addressModels.Address{},
 		&paymentModels.Payment{},
+		&bookings.NotificationIntent{},
 		&payments.Checkout{},
 		&payments.Receipt{},
 	)

@@ -29,6 +29,8 @@ func New(db *gorm.DB, cfg Config) *Service {
 }
 
 type View struct {
+	ConfirmationCode   string `json:"confirmation_code,omitempty"`
+	NotificationStatus string `json:"notification_status,omitempty"`
 	Checkout
 	CheckoutURL       string `json:"checkout_url,omitempty"`
 	ReservationStatus string `json:"reservation_status"`
@@ -39,6 +41,17 @@ func (s *Service) view(ctx context.Context, c Checkout, verified bool) (View, er
 	var r reservation.Reservation
 	e := s.DB.WithContext(ctx).First(&r, c.ReservationID).Error
 	v := View{Checkout: c, ReservationStatus: string(r.Status), Verified: verified}
+	if e != nil {
+		return v, e
+	}
+	if r.Status == "confirmed" && c.State == "completed" && verified {
+		err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error { return bookings.EnsureConfirmation(tx, &r) })
+		if err != nil {
+			return v, err
+		}
+		v.ConfirmationCode = bookings.ConfirmationCode(r)
+		v.NotificationStatus = "pending_configuration"
+	}
 	if c.API != "orders" {
 		v.State = "review"
 		v.Issue = "legacy_preferences"

@@ -11,6 +11,7 @@ import (
 )
 
 func Register(r *gin.RouterGroup, s *Service) {
+	RegisterCodeRoutes(r, s)
 	fail := func(c *gin.Context, err error) {
 		code := 500
 		message := "internal server error"

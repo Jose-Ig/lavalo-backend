@@ -18,6 +18,9 @@ const (
 
 // Reservation represents a car wash reservation
 type Reservation struct {
+	CodeHash        *string           `gorm:"uniqueIndex" json:"-"`
+	WhatsAppOptIn   bool              `json:"whatsapp_opt_in"`
+	QRVerifiedAt    *time.Time        `json:"qr_verified_at,omitempty"`
 	Email           string            `gorm:"type:varchar(254)" json:"email,omitempty"`
 	ID              uint              `gorm:"primaryKey" json:"id"`
 	UserID          uint              `gorm:"index;not null" json:"user_id"`

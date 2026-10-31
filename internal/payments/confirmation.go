@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Jose-Ig/lavalo-backend/internal/bookings"
 	reservation "github.com/Jose-Ig/lavalo-backend/internal/reservations/domain/models"
 	slot "github.com/Jose-Ig/lavalo-backend/internal/slots/domain/models"
 	"github.com/gin-gonic/gin"
@@ -233,6 +234,11 @@ func (s *Service) Apply(ctx context.Context, o Order) error {
 		}
 		if e := tx.Model(&r).Updates(map[string]any{"status": r.Status, "expires_at": r.ExpiresAt}).Error; e != nil {
 			return e
+		}
+		if r.Status == "confirmed" {
+			if e := bookings.EnsureConfirmation(tx, &r); e != nil {
+				return e
+			}
 		}
 		return tx.Model(&checkout).Updates(map[string]any{"state": state, "issue": issue}).Error
 	})

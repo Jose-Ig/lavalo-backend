@@ -22,14 +22,15 @@ var ErrConflict = errors.New("slot unavailable")
 var ErrInvalid = errors.New("invalid reservation")
 
 type Input struct {
-	Email     string    `json:"email"`
-	SlotID    uint      `json:"slot_id"`
-	StartTime time.Time `json:"start_time"`
-	Duration  int       `json:"duration_minutes"`
-	Name      string    `json:"name"`
-	Phone     string    `json:"phone"`
-	Plate     string    `json:"vehicle_plate"`
-	Model     string    `json:"vehicle_model"`
+	WhatsAppOptIn bool      `json:"whatsapp_opt_in"`
+	Email         string    `json:"email"`
+	SlotID        uint      `json:"slot_id"`
+	StartTime     time.Time `json:"start_time"`
+	Duration      int       `json:"duration_minutes"`
+	Name          string    `json:"name"`
+	Phone         string    `json:"phone"`
+	Plate         string    `json:"vehicle_plate"`
+	Model         string    `json:"vehicle_model"`
 }
 
 type Service struct {
@@ -96,7 +97,7 @@ func (s *Service) Create(ctx context.Context, i Input) (*reservation.Reservation
 	if expiry.After(i.StartTime) {
 		expiry = i.StartTime
 	}
-	r := &reservation.Reservation{SlotID: i.SlotID, StartTime: i.StartTime.UTC(), EndTime: end.UTC(), DurationMinutes: i.Duration, Name: strings.TrimSpace(i.Name), Email: strings.TrimSpace(i.Email), Phone: i.Phone, VehiclePlate: strings.ToUpper(strings.TrimSpace(i.Plate)), VehicleModel: strings.TrimSpace(i.Model), AccessTokenHash: tokenHash(token), ExpiresAt: &expiry, Status: reservation.ReservationStatusPending}
+	r := &reservation.Reservation{SlotID: i.SlotID, StartTime: i.StartTime.UTC(), EndTime: end.UTC(), DurationMinutes: i.Duration, Name: strings.TrimSpace(i.Name), Email: strings.TrimSpace(i.Email), WhatsAppOptIn: i.WhatsAppOptIn, Phone: i.Phone, VehiclePlate: strings.ToUpper(strings.TrimSpace(i.Plate)), VehicleModel: strings.TrimSpace(i.Model), AccessTokenHash: tokenHash(token), ExpiresAt: &expiry, Status: reservation.ReservationStatusPending}
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// UPDATE takes a row lock in PostgreSQL and a writer lock in SQLite before checking conflicts.
 		result := tx.Model(&slot.Slot{}).Where("id = ? AND is_available = ?", i.SlotID, true).Update("updated_at", s.Now())
