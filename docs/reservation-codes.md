@@ -51,3 +51,14 @@ Reiniciar Metro con npx expo start --clear. Una development build anterior neces
 5. Dentro del horario reservado, escanear el QR del espacio correcto; uno distinto debe rechazarse.
 6. La verificación termina en Espacio verificado, con activación física pendiente de integrar.
 Los envíos por SMS/WhatsApp quedan pendientes hasta elegir/configurar sus proveedores.
+
+## Pago simulado local
+
+Con MP_MOCK_PAYMENTS=true, GIN_MODE=debug y MP_LIVE_MODE=false en el backend, tocar Pagar
+confirma una reserva nueva sin llamar a Mercado Pago. Se guarda un checkout con API mock,
+se emite el código real de esa reserva local y se preparan los avisos pendientes de proveedor.
+La app identifica el pago como simulado y oculta cancelar al confirmar. No se cobra dinero.
+El modo no modifica intentos ya creados en Mercado Pago: crear una reserva nueva para probar.
+El código permite probar consulta y QR respetando espacio y horario. Reiniciar Go tras cambiar la variable.
+Para retomar Checkout real, usar MP_MOCK_PAYMENTS=false y reiniciar. El modo está bloqueado en
+release y live; las simulaciones no se reconcilian con Mercado Pago ni se verifican con el modo apagado.

@@ -29,6 +29,7 @@ func New(db *gorm.DB, cfg Config) *Service {
 }
 
 type View struct {
+	Simulated          bool   `json:"simulated,omitempty"`
 	ConfirmationCode   string `json:"confirmation_code,omitempty"`
 	NotificationStatus string `json:"notification_status,omitempty"`
 	Checkout
@@ -51,6 +52,13 @@ func (s *Service) view(ctx context.Context, c Checkout, verified bool) (View, er
 		}
 		v.ConfirmationCode = bookings.ConfirmationCode(r)
 		v.NotificationStatus = "pending_configuration"
+	}
+	if c.API == "mock" {
+		if !s.mockEnabled() {
+			return View{}, ErrUnavailable
+		}
+		v.Simulated = true
+		return v, nil
 	}
 	if c.API != "orders" {
 		v.State = "review"
@@ -76,6 +84,9 @@ func uuid() (string, error) {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
 func (s *Service) Start(ctx context.Context, id uint, token string) (View, error) {
+	if s.mockEnabled() {
+		return s.simulatePayment(ctx, id, token)
+	}
 	if !s.Config.Ready() {
 		return View{}, ErrUnavailable
 	}
@@ -200,6 +211,12 @@ func (s *Service) Status(ctx context.Context, id uint, token string) (View, erro
 	var c Checkout
 	if e := s.DB.WithContext(ctx).Where("reservation_id = ?", id).First(&c).Error; e != nil {
 		return View{}, e
+	}
+	if c.API == "mock" {
+		if !s.mockEnabled() {
+			return View{}, ErrUnavailable
+		}
+		return s.view(ctx, c, true)
 	}
 	if c.API != "orders" {
 		return s.view(ctx, c, false)
