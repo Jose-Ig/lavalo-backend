@@ -20,7 +20,6 @@ var ErrConflict = errors.New("reservation cannot be paid")
 var ErrMismatch = errors.New("provider order does not match checkout")
 
 type Config struct {
-	MockPayments  bool
 	Enabled       bool
 	LiveMode      bool
 	AccessToken   string
@@ -31,7 +30,7 @@ type Config struct {
 
 func ConfigFromEnv() Config {
 	id, _ := strconv.ParseInt(os.Getenv("MP_COLLECTOR_ID"), 10, 64)
-	return Config{MockPayments: os.Getenv("MP_MOCK_PAYMENTS") == "true" && os.Getenv("GIN_MODE") == "debug", Enabled: os.Getenv("MP_ENABLED") == "true", LiveMode: os.Getenv("MP_LIVE_MODE") == "true", AccessToken: os.Getenv("MP_ACCESS_TOKEN"), WebhookSecret: os.Getenv("MP_WEBHOOK_SECRET"), CollectorID: id, PublicURL: strings.TrimRight(os.Getenv("MP_PUBLIC_BASE_URL"), "/")}
+	return Config{Enabled: os.Getenv("MP_ENABLED") == "true", LiveMode: os.Getenv("MP_LIVE_MODE") == "true", AccessToken: os.Getenv("MP_ACCESS_TOKEN"), WebhookSecret: os.Getenv("MP_WEBHOOK_SECRET"), CollectorID: id, PublicURL: strings.TrimRight(os.Getenv("MP_PUBLIC_BASE_URL"), "/")}
 }
 func (c Config) Ready() bool {
 	u, e := url.Parse(c.PublicURL)

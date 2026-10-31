@@ -451,3 +451,25 @@ func TestOrdersMigrationPreservesLegacyRows(t *testing.T) {
 		}
 	}
 }
+
+func TestRemovedMockFlagCannotAutoApprovePayment(t *testing.T) {
+	t.Setenv("MP_MOCK_PAYMENTS", "true")
+	s, gateway, id, token := fixture(t)
+	view, err := s.Start(context.Background(), id, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gateway.calls != 1 || view.CheckoutURL == "" || view.State == "completed" || view.ReservationStatus != "pending" || view.ConfirmationCode != "" {
+		t.Fatal("payment must go through provider without local approval", view)
+	}
+}
+func TestHistoricalMockCheckoutIsNotVerifiedAsProviderPayment(t *testing.T) {
+	s, _, id, token := fixture(t)
+	checkout := Checkout{API: "mock", ReservationID: id, Reference: "historical-local-simulation", State: "completed", AmountCents: 500000, Currency: "ARS", ExpiresAt: s.Now().Add(time.Minute)}
+	if err := s.DB.Create(&checkout).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Status(context.Background(), id, token); !errors.Is(err, ErrUnavailable) {
+		t.Fatal("historical simulation accepted", err)
+	}
+}
