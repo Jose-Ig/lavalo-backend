@@ -77,6 +77,7 @@ func Register(r *gin.RouterGroup, s *Service) {
 		c.Status(204)
 	})
 	r.GET("/available-slots", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
 		start, err := time.Parse(time.RFC3339, c.Query("start_time"))
 		duration, e := strconv.Atoi(c.Query("duration_minutes"))
 		if err != nil || e != nil {
