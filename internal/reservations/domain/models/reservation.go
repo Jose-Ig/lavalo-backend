@@ -18,6 +18,7 @@ const (
 
 // Reservation represents a car wash reservation
 type Reservation struct {
+	Email           string            `gorm:"type:varchar(254)" json:"email,omitempty"`
 	ID              uint              `gorm:"primaryKey" json:"id"`
 	UserID          uint              `gorm:"index;not null" json:"user_id"`
 	SlotID          uint              `gorm:"index;not null" json:"slot_id"`

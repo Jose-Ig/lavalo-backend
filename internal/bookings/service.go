@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ var ErrConflict = errors.New("slot unavailable")
 var ErrInvalid = errors.New("invalid reservation")
 
 type Input struct {
+	Email     string    `json:"email"`
 	SlotID    uint      `json:"slot_id"`
 	StartTime time.Time `json:"start_time"`
 	Duration  int       `json:"duration_minutes"`
@@ -46,6 +48,13 @@ var Location = func() *time.Location {
 }()
 
 func (s *Service) Validate(i Input) error {
+	if email := strings.TrimSpace(i.Email); email != "" {
+		address, err := mail.ParseAddress(email)
+		if err != nil || len(email) > 254 || address.Address != email {
+			return ErrInvalid
+		}
+	}
+
 	start := i.StartTime.In(Location)
 	now := s.Now().In(Location)
 	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, Location)
@@ -87,7 +96,7 @@ func (s *Service) Create(ctx context.Context, i Input) (*reservation.Reservation
 	if expiry.After(i.StartTime) {
 		expiry = i.StartTime
 	}
-	r := &reservation.Reservation{SlotID: i.SlotID, StartTime: i.StartTime.UTC(), EndTime: end.UTC(), DurationMinutes: i.Duration, Name: strings.TrimSpace(i.Name), Phone: i.Phone, VehiclePlate: strings.ToUpper(strings.TrimSpace(i.Plate)), VehicleModel: strings.TrimSpace(i.Model), AccessTokenHash: tokenHash(token), ExpiresAt: &expiry, Status: reservation.ReservationStatusPending}
+	r := &reservation.Reservation{SlotID: i.SlotID, StartTime: i.StartTime.UTC(), EndTime: end.UTC(), DurationMinutes: i.Duration, Name: strings.TrimSpace(i.Name), Email: strings.TrimSpace(i.Email), Phone: i.Phone, VehiclePlate: strings.ToUpper(strings.TrimSpace(i.Plate)), VehicleModel: strings.TrimSpace(i.Model), AccessTokenHash: tokenHash(token), ExpiresAt: &expiry, Status: reservation.ReservationStatusPending}
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// UPDATE takes a row lock in PostgreSQL and a writer lock in SQLite before checking conflicts.
 		result := tx.Model(&slot.Slot{}).Where("id = ? AND is_available = ?", i.SlotID, true).Update("updated_at", s.Now())
