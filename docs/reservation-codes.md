@@ -28,14 +28,11 @@ Para probar la cámara se puede generar un QR con el texto exacto uash://slot/1 
 
 notification_intents conserva una intención por reserva/canal, con restricción única para evitar duplicados.
 Por ahora su estado es pending_configuration: NO hay dispatcher ni se envían mensajes automáticamente.
-Email se prepara solo si se indicó una dirección. WhatsApp se prepara solo con el consentimiento explícito
-recogido en el formulario. Los intentos no guardan el código ni destinatario en texto: un futuro worker
-los obtiene desde la reserva justo antes de enviar.
-
-WhatsApp requiere WhatsApp Business Platform/Cloud API o proveedor, número habilitado, plantilla de
-confirmación y consentimiento. El enlace wa.me de soporte abre un chat manual y no reemplaza esa API.
-Email requiere SMTP o API transaccional y remitente configurado. SMS requiere un proveedor y costos
-por país/destino: es una opción de respaldo a decidir, no está implementado.
+SMS se prepara por defecto para el celular de cada reserva confirmada. WhatsApp se agrega únicamente
+con la casilla de consentimiento marcada; no reemplaza el SMS. El formulario solo solicita nombre y
+celular: no solicita email ni datos del vehículo. Los campos históricos se conservan en la base.
+Los intentos no guardan el código ni destinatario en texto: un futuro worker los obtiene desde la reserva.
+SMS y WhatsApp requieren integrar y configurar proveedores de mensajería antes de realizar envíos reales.
 No se deben marcar avisos como entregados hasta tener confirmación del proveedor.
 Los errores de mensajería no deben revertir un pago aprobado ni generar un código distinto al reintentar.
 
@@ -53,4 +50,4 @@ Reiniciar Metro con npx expo start --clear. Una development build anterior neces
 4. Consultar cualquiera de los códigos, incluso desde otro dispositivo conectado al mismo backend.
 5. Dentro del horario reservado, escanear el QR del espacio correcto; uno distinto debe rechazarse.
 6. La verificación termina en Espacio verificado, con activación física pendiente de integrar.
-Los envíos por WhatsApp/email quedan pendientes hasta elegir/configurar sus proveedores.
+Los envíos por SMS/WhatsApp quedan pendientes hasta elegir/configurar sus proveedores.

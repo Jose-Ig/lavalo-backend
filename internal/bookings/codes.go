@@ -63,8 +63,8 @@ func EnsureConfirmation(tx *gorm.DB, r *reservation.Reservation) error {
 		r.CodeHash = &hash
 	}
 	channels := []string{}
-	if r.Email != "" {
-		channels = append(channels, "email")
+	if r.Phone != "" {
+		channels = append(channels, "sms")
 	}
 	if r.WhatsAppOptIn && r.Phone != "" {
 		channels = append(channels, "whatsapp")

@@ -54,6 +54,11 @@ func TestIndependentCodesAndIdempotentNotificationIntents(t *testing.T) {
 	if n != 2 {
 		t.Fatal("duplicate notifications", n)
 	}
+	var channels []string
+	s.DB.Model(&NotificationIntent{}).Order("channel").Pluck("channel", &channels)
+	if strings.Join(channels, ",") != "sms,whatsapp" {
+		t.Fatal("expected SMS plus WhatsApp, never email", channels)
+	}
 	lookup, e := s.LookupCode(ctx, strings.ToLower(code))
 	if e != nil || lookup.ID != r.ID || lookup.CanVerifyQR {
 		t.Fatal(lookup, e)
@@ -159,7 +164,11 @@ func TestWhatsAppRequiresOptIn(t *testing.T) {
 	}
 	var n int64
 	s.DB.Model(&NotificationIntent{}).Count(&n)
-	if n != 0 {
-		t.Fatal("WhatsApp queued without consent")
+	if n != 1 {
+		t.Fatal("expected SMS by default", n)
+	}
+	var intent NotificationIntent
+	if err := s.DB.First(&intent).Error; err != nil || intent.Channel != "sms" {
+		t.Fatal("expected only SMS without WhatsApp consent", intent.Channel, err)
 	}
 }

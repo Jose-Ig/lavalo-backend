@@ -30,7 +30,7 @@ func fixture(t *testing.T) (*Service, Input) {
 	s := New(db)
 	now := time.Date(2026, 10, 28, 8, 0, 0, 0, Location)
 	s.Now = func() time.Time { return now }
-	return s, Input{SlotID: 1, StartTime: now.Add(2 * time.Hour), Duration: 60, Name: "Test User", Phone: "+543511234567", Plate: "ABC123", Model: "Test car"}
+	return s, Input{SlotID: 1, StartTime: now.Add(2 * time.Hour), Duration: 60, Name: "Test User", Phone: "+543511234567"}
 }
 func TestOverlapAdjacentAndPrivateAccess(t *testing.T) {
 	s, i := fixture(t)
