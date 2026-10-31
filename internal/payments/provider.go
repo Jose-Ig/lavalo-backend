@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,6 +17,7 @@ import (
 )
 
 var ErrUnavailable = errors.New("checkout temporarily unavailable")
+var ErrProviderAuthorization = fmt.Errorf("Mercado Pago rejected API authorization: %w", ErrUnavailable)
 var ErrConflict = errors.New("reservation cannot be paid")
 var ErrMismatch = errors.New("provider order does not match checkout")
 
@@ -90,6 +92,19 @@ func (m *MercadoPago) request(ctx context.Context, method, path string, body []b
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Never expose provider bodies, tokens or customer data. Only log an allowlisted policy code.
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			var detail struct {
+				Code string `json:"code"`
+			}
+			_ = json.NewDecoder(io.LimitReader(resp.Body, 8192)).Decode(&detail)
+			policy := "authorization_rejected"
+			if detail.Code == "PA_UNAUTHORIZED_RESULT_FROM_POLICIES" {
+				policy = detail.Code
+			}
+			log.Printf("Mercado Pago authorization rejected: http_status=%d code=%s", resp.StatusCode, policy)
+			return ErrProviderAuthorization
+		}
 		return ErrUnavailable
 	}
 	if e = json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(out); e != nil {

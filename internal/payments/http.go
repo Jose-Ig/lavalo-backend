@@ -13,7 +13,11 @@ import (
 func failure(c *gin.Context, err error) {
 	code := http.StatusServiceUnavailable
 	message := "No pudimos verificar el pago. Reintentá la consulta."
+	errorCode := "payment_unavailable"
 	switch {
+	case errors.Is(err, ErrProviderAuthorization):
+		errorCode = "payment_provider_authorization"
+		message = "No pudimos abrir Mercado Pago. El servicio de pagos requiere revisión. Contactanos para recibir ayuda."
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		code = 404
 		message = "Reserva o pago no encontrado."
@@ -24,7 +28,7 @@ func failure(c *gin.Context, err error) {
 		code = 422
 		message = "El pago requiere revisión."
 	}
-	c.JSON(code, gin.H{"error": message})
+	c.JSON(code, gin.H{"error": message, "code": errorCode})
 }
 func Register(r *gin.RouterGroup, s *Service) {
 	handle := func(start bool) gin.HandlerFunc {

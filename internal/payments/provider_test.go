@@ -3,6 +3,7 @@ package payments
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -136,5 +137,31 @@ func TestDisabledCheckoutDoesNotCallProvider(t *testing.T) {
 	}
 	if f.calls != 0 {
 		t.Fatal("provider called while disabled")
+	}
+}
+
+func TestProviderAuthorizationErrorIsDistinctAndDoesNotLeakDetails(t *testing.T) {
+	for _, status := range []int{401, 403} {
+		gateway := NewGateway(Config{AccessToken: "private-secret"})
+		gateway.HTTP.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(`{"code":"PA_UNAUTHORIZED_RESULT_FROM_POLICIES","message":"private-secret buyer@example.com"}`))}, nil
+		})
+		_, err := gateway.GetOrder(context.Background(), "ORDTST01ABC")
+		if !errors.Is(err, ErrProviderAuthorization) || !errors.Is(err, ErrUnavailable) {
+			t.Fatal("authorization error not classified", err)
+		}
+		gin.SetMode(gin.TestMode)
+		router := gin.New()
+		router.GET("/failure", func(c *gin.Context) { failure(c, err) })
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest("GET", "/failure", nil))
+		if w.Code != 503 || !strings.Contains(w.Body.String(), "payment_provider_authorization") {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		for _, secret := range []string{"private-secret", "buyer@example.com", "PA_UNAUTHORIZED_RESULT_FROM_POLICIES"} {
+			if strings.Contains(err.Error(), secret) || strings.Contains(w.Body.String(), secret) {
+				t.Fatal("private provider details exposed")
+			}
+		}
 	}
 }
