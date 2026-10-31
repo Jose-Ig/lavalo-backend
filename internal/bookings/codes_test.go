@@ -41,7 +41,7 @@ func TestIndependentCodesAndIdempotentNotificationIntents(t *testing.T) {
 	s, r, _ := confirmedFixture(t)
 	ctx := context.Background()
 	code := ConfirmationCode(*r)
-	if code == "" || len(code) != 24 {
+	if code == "" || len(code) != 6 {
 		t.Fatal("invalid confirmation code")
 	}
 	for i := 0; i < 2; i++ {
@@ -170,5 +170,112 @@ func TestWhatsAppRequiresOptIn(t *testing.T) {
 	var intent NotificationIntent
 	if err := s.DB.First(&intent).Error; err != nil || intent.Channel != "sms" {
 		t.Fatal("expected only SMS without WhatsApp consent", intent.Channel, err)
+	}
+}
+
+func TestDailyCodeRequiresCorrectDateForLookupAndQR(t *testing.T) {
+	s, r, _ := confirmedFixture(t)
+	code := ConfirmationCode(*r)
+	day := r.StartTime.In(Location).Format("2006-01-02")
+	wrong := r.StartTime.In(Location).AddDate(0, 0, 1).Format("2006-01-02")
+	if _, err := s.LookupCode(context.Background(), code, wrong); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatal("wrong date accepted", err)
+	}
+	if _, err := s.LookupCode(context.Background(), code, "2026-02-30"); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatal("invalid date accepted", err)
+	}
+	now := r.StartTime
+	s.Now = func() time.Time { return now }
+	if _, err := s.VerifySlotQR(context.Background(), code, "uash://slot/1", wrong); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatal("QR ignored date", err)
+	}
+	got, err := s.VerifySlotQR(context.Background(), code, "uash://slot/1", day)
+	if err != nil || got.ReservationDate != day || got.ReservationNumber != r.Number() {
+		t.Fatal(got, err)
+	}
+	// The same short code can have an independent hash on another day.
+	if dailyCodeHash(day, code) == dailyCodeHash(wrong, code) {
+		t.Fatal("hash is not date scoped")
+	}
+}
+func TestLegacyCodesRemainStable(t *testing.T) {
+	s, i := fixture(t)
+	s.DB.AutoMigrate(&NotificationIntent{})
+	r, _, err := s.Create(context.Background(), i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := ConfirmationCode(*r)
+	hash := codeHash(legacy)
+	r.Status = "confirmed"
+	r.CodeHash = &hash
+	if err = s.DB.Save(r).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DB.Transaction(func(tx *gorm.DB) error { return EnsureConfirmation(tx, r) }); err != nil {
+		t.Fatal(err)
+	}
+	if ConfirmationCode(*r) != legacy || len(legacy) != 24 {
+		t.Fatal("legacy code changed")
+	}
+	got, err := s.LookupCode(context.Background(), legacy)
+	if err != nil || got.ID != r.ID {
+		t.Fatal(got, err)
+	}
+}
+func TestDailyCollisionSelectsAnotherStableCode(t *testing.T) {
+	s, i := fixture(t)
+	s.DB.AutoMigrate(&NotificationIntent{})
+	r, _, err := s.Create(context.Background(), i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := *r
+	candidate.CodeVersion = 2
+	firstCode := ConfirmationCode(candidate)
+	hash := dailyCodeHash(r.StartTime.In(Location).Format("2006-01-02"), firstCode)
+	// Reserve the first candidate, simulating another code already allocated that day.
+	other := reservation.Reservation{SlotID: r.SlotID, StartTime: r.EndTime, CodeHash: &hash, CodeVersion: 2, Status: "cancelled"}
+	if err = s.DB.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	r.Status = "confirmed"
+	if err = s.DB.Model(r).Update("status", "confirmed").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DB.Transaction(func(tx *gorm.DB) error { return EnsureConfirmation(tx, r) }); err != nil {
+		t.Fatal(err)
+	}
+	if r.CodeNonce == 0 || ConfirmationCode(*r) == firstCode {
+		t.Fatal("collision was not resolved")
+	}
+	code := ConfirmationCode(*r)
+	if err = s.DB.Transaction(func(tx *gorm.DB) error { return EnsureConfirmation(tx, r) }); err != nil {
+		t.Fatal(err)
+	}
+	if ConfirmationCode(*r) != code {
+		t.Fatal("retry changed allocated code")
+	}
+}
+func TestShortCodeKeepsLeadingZeroAndLocalReservationNumber(t *testing.T) {
+	r := reservation.Reservation{ID: 10, AccessTokenHash: strings.Repeat("a", 64), CodeVersion: 2}
+	found := false
+	for nonce := 0; nonce < 1000; nonce++ {
+		r.CodeNonce = nonce
+		code := ConfirmationCode(r)
+		if len(code) != 6 {
+			t.Fatal("code length", code)
+		}
+		if code[0] == '0' {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("leading zero was lost")
+	}
+	r.StartTime = time.Date(2026, 11, 1, 1, 30, 0, 0, time.UTC)
+	if r.Number() != "31102026-2230" {
+		t.Fatal("wrong Argentina date/time", r.Number())
 	}
 }

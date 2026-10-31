@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base32"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net/url"
@@ -36,6 +37,10 @@ func ConfirmationCode(r reservation.Reservation) string {
 	if len(r.AccessTokenHash) != 64 || r.ID == 0 {
 		return ""
 	}
+	if r.CodeVersion == 2 {
+		digest := sha256.Sum256([]byte(fmt.Sprintf("uash:confirmation:v2:%d:%s:%d", r.ID, r.AccessTokenHash, r.CodeNonce)))
+		return fmt.Sprintf("%06d", binary.BigEndian.Uint64(digest[:8])%1000000)
+	}
 	digest := sha256.Sum256([]byte(fmt.Sprintf("uash:confirmation:v1:%d:%s", r.ID, r.AccessTokenHash)))
 	raw := codeAlphabet.EncodeToString(digest[:10]) // 80 bits, 16 printable characters.
 	return "UASH-" + raw[:4] + "-" + raw[4:8] + "-" + raw[8:12] + "-" + raw[12:]
@@ -51,16 +56,47 @@ func EnsureConfirmation(tx *gorm.DB, r *reservation.Reservation) error {
 	if r.Status != "confirmed" && r.Status != "completed" {
 		return nil
 	}
-	code := ConfirmationCode(*r)
-	if code == "" {
-		return ErrInvalid
+
+	// Serialize concurrent confirmation views before allocating a code.
+	if err := tx.Model(r).Where("id = ?", r.ID).Update("updated_at", time.Now()).Error; err != nil {
+		return err
 	}
-	hash := codeHash(code)
+	if err := tx.First(r, r.ID).Error; err != nil {
+		return err
+	}
 	if r.CodeHash == nil {
-		if err := tx.Model(r).Where("code_hash IS NULL").Update("code_hash", hash).Error; err != nil {
-			return err
+		r.CodeVersion = 2
+		day := r.StartTime.In(Location).Format("2006-01-02")
+		allocated := false
+		for nonce := 0; nonce < 1000; nonce++ {
+			r.CodeNonce = nonce
+			code := ConfirmationCode(*r)
+			if code == "" {
+				return ErrInvalid
+			}
+			hash := dailyCodeHash(day, code)
+			var count int64
+			if err := tx.Model(&reservation.Reservation{}).Unscoped().Where("code_hash = ?", hash).Count(&count).Error; err != nil {
+				return err
+			}
+			if count != 0 {
+				continue
+			}
+			// The unique index also rejects a concurrent collision. Its transaction rolls back for retry.
+			result := tx.Model(r).Where("code_hash IS NULL").Updates(map[string]any{"code_hash": hash, "code_version": 2, "code_nonce": nonce})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return ErrConflict
+			}
+			r.CodeHash = &hash
+			allocated = true
+			break
 		}
-		r.CodeHash = &hash
+		if !allocated {
+			return ErrConflict
+		}
 	}
 	channels := []string{}
 	if r.Phone != "" {
@@ -79,27 +115,56 @@ func EnsureConfirmation(tx *gorm.DB, r *reservation.Reservation) error {
 }
 
 type ReservationAccess struct {
-	ID               uint                          `json:"id"`
-	Code             string                        `json:"code"`
-	SlotID           uint                          `json:"slot_id"`
-	SlotLabel        string                        `json:"slot_label"`
-	StartTime        time.Time                     `json:"start_time"`
-	EndTime          time.Time                     `json:"end_time"`
-	Duration         int                           `json:"duration_minutes"`
-	Status           reservation.ReservationStatus `json:"status"`
-	CanVerifyQR      bool                          `json:"can_verify_qr"`
-	ActivationReason string                        `json:"activation_reason"`
-	QRVerifiedAt     *time.Time                    `json:"qr_verified_at,omitempty"`
-	ActivationStatus string                        `json:"activation_status"`
+	ReservationNumber string                        `json:"reservation_number"`
+	ReservationDate   string                        `json:"reservation_date"`
+	ID                uint                          `json:"id"`
+	Code              string                        `json:"code"`
+	SlotID            uint                          `json:"slot_id"`
+	SlotLabel         string                        `json:"slot_label"`
+	StartTime         time.Time                     `json:"start_time"`
+	EndTime           time.Time                     `json:"end_time"`
+	Duration          int                           `json:"duration_minutes"`
+	Status            reservation.ReservationStatus `json:"status"`
+	CanVerifyQR       bool                          `json:"can_verify_qr"`
+	ActivationReason  string                        `json:"activation_reason"`
+	QRVerifiedAt      *time.Time                    `json:"qr_verified_at,omitempty"`
+	ActivationStatus  string                        `json:"activation_status"`
 }
 
-func (s *Service) findByCode(db *gorm.DB, code string) (reservation.Reservation, error) {
+func dailyCodeHash(day, code string) string {
+	return codeHash("uash:daily:v2:" + day + ":" + normalizeCode(code))
+}
+func (s *Service) lookupDay(dates []string) (string, error) {
+	day := s.Now().In(Location).Format("2006-01-02")
+	if len(dates) > 0 && dates[0] != "" {
+		day = dates[0]
+	}
+	parsed, err := time.ParseInLocation("2006-01-02", day, Location)
+	if err != nil || parsed.Format("2006-01-02") != day {
+		return "", gorm.ErrRecordNotFound
+	}
+	return day, nil
+}
+func (s *Service) findByCode(db *gorm.DB, code, day string) (reservation.Reservation, error) {
 	var r reservation.Reservation
 	normalized := normalizeCode(code)
+	if len(normalized) == 6 {
+		for _, c := range normalized {
+			if c < '0' || c > '9' {
+				return r, gorm.ErrRecordNotFound
+			}
+		}
+		err := db.Where("code_hash = ? AND code_version = ?", dailyCodeHash(day, normalized), 2).First(&r).Error
+		if err == nil && r.StartTime.In(Location).Format("2006-01-02") != day {
+			return r, gorm.ErrRecordNotFound
+		}
+		return r, err
+	}
+	// Existing long codes continue to work without being changed or reissued.
 	if len(normalized) != 20 || !strings.HasPrefix(normalized, "UASH") {
 		return r, gorm.ErrRecordNotFound
 	}
-	err := db.Where("code_hash = ?", codeHash(code)).First(&r).Error
+	err := db.Where("code_hash = ? AND code_version = ?", codeHash(code), 0).First(&r).Error
 	return r, err
 }
 func (s *Service) access(db *gorm.DB, r reservation.Reservation) (ReservationAccess, error) {
@@ -122,11 +187,15 @@ func (s *Service) access(db *gorm.DB, r reservation.Reservation) (ReservationAcc
 	if r.QRVerifiedAt != nil {
 		activation = "awaiting_controller"
 	}
-	return ReservationAccess{ID: r.ID, Code: ConfirmationCode(r), SlotID: r.SlotID, SlotLabel: sl.Label, StartTime: r.StartTime, EndTime: r.EndTime, Duration: r.DurationMinutes, Status: r.Status, CanVerifyQR: reason == "ready", ActivationReason: reason, QRVerifiedAt: r.QRVerifiedAt, ActivationStatus: activation}, nil
+	return ReservationAccess{ReservationNumber: r.Number(), ReservationDate: r.StartTime.In(Location).Format("2006-01-02"), ID: r.ID, Code: ConfirmationCode(r), SlotID: r.SlotID, SlotLabel: sl.Label, StartTime: r.StartTime, EndTime: r.EndTime, Duration: r.DurationMinutes, Status: r.Status, CanVerifyQR: reason == "ready", ActivationReason: reason, QRVerifiedAt: r.QRVerifiedAt, ActivationStatus: activation}, nil
 }
-func (s *Service) LookupCode(ctx context.Context, code string) (ReservationAccess, error) {
+func (s *Service) LookupCode(ctx context.Context, code string, dates ...string) (ReservationAccess, error) {
 	db := s.DB.WithContext(ctx)
-	r, err := s.findByCode(db, code)
+	day, err := s.lookupDay(dates)
+	if err != nil {
+		return ReservationAccess{}, err
+	}
+	r, err := s.findByCode(db, code, day)
 	if err != nil {
 		return ReservationAccess{}, err
 	}
@@ -143,14 +212,18 @@ func parseSlotQR(raw string) (uint, error) {
 	}
 	return uint(id), nil
 }
-func (s *Service) VerifySlotQR(ctx context.Context, code, qr string) (ReservationAccess, error) {
+func (s *Service) VerifySlotQR(ctx context.Context, code, qr string, dates ...string) (ReservationAccess, error) {
 	slotID, err := parseSlotQR(qr)
+	if err != nil {
+		return ReservationAccess{}, err
+	}
+	day, err := s.lookupDay(dates)
 	if err != nil {
 		return ReservationAccess{}, err
 	}
 	var result ReservationAccess
 	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		r, err := s.findByCode(tx, code)
+		r, err := s.findByCode(tx, code, day)
 		if err != nil {
 			return err
 		}

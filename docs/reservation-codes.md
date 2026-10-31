@@ -5,14 +5,14 @@ usuario o instalación. Solo se impide solapar reservas vigentes sobre el mismo 
 El almacenamiento local del checkout es una comodidad para continuar un pago, no la identidad del cliente.
 
 Al confirmar el pago, dentro de la misma transacción se prepara un código único y estable por reserva,
-con 80 bits de entropía derivados del secreto aleatorio de la reserva y su ID. Se almacena únicamente
+de 6 dígitos derivado del secreto aleatorio de la reserva, su ID y un contador para resolver colisiones del día. Se almacena únicamente
 el hash del código; nunca se incluye el código en URLs ni logs. La confirmación autenticada muestra
 el código seleccionable en la app. Las reservas confirmadas anteriores lo obtienen al consultar el pago.
 No se generan códigos de acceso válidos para reservas pendientes de pago o pagos en revisión.
 
-POST /api/v1/reservations/lookup recibe {"code":"UASH-...."}. No necesita sesión del dispositivo.
+POST /api/v1/reservations/lookup recibe {"code":"123456","date":"2026-10-31"}. No necesita sesión del dispositivo.
 Devuelve solo el turno, espacio y estado de habilitación; no expone token de pago, email ni teléfono.
-POST /api/v1/reservations/verify-slot recibe {"code":"UASH-....","qr":"uash://slot/1"}.
+POST /api/v1/reservations/verify-slot recibe {"code":"123456","date":"2026-10-31","qr":"uash://slot/1"}.
 Comprueba el código, pago confirmado, espacio exacto, disponibilidad y horario [inicio, fin).
 Repetir un QR válido no duplica la verificación. No permite usar un código cancelado o fuera de horario.
 Los endpoints limitan intentos a 60/minuto por conexión IP, con memoria acotada. Para despliegues con
@@ -62,3 +62,15 @@ El modo no modifica intentos ya creados en Mercado Pago: crear una reserva nueva
 El código permite probar consulta y QR respetando espacio y horario. Reiniciar Go tras cambiar la variable.
 Para retomar Checkout real, usar MP_MOCK_PAYMENTS=false y reiniciar. El modo está bloqueado en
 release y live; las simulaciones no se reconcilian con Mercado Pago ni se verifican con el modo apagado.
+
+## Referencia y código corto
+
+El número visible usa la fecha/hora del turno en Argentina: DDMMYYYY-HHmm (ejemplo 31102026-1430).
+Es una referencia legible; el ID interno y el espacio distinguen reservas simultáneas.
+Las reservas nuevas confirmadas reciben 6 números, incluidos ceros iniciales. Se almacenan solo
+su hash con la fecha del turno y la versión/contador de derivación. Los códigos no se duplican
+para un mismo día; ante colisión se usa otro candidato y el índice único impide asignación duplicada.
+Una colisión concurrente revierte la transacción y admite reintento. Los códigos antiguos se conservan.
+Consulta y QR reciben date (AAAA-MM-DD); si se omite, se usa hoy en Argentina. Nunca se busca un
+código corto en otros días. La app solicita la fecha y la conserva al escanear. El límite de intentos
+sigue vigente; para producción se requiere el limitador distribuido mencionado arriba.

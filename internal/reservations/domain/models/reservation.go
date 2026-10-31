@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"gorm.io/gorm"
@@ -18,6 +19,8 @@ const (
 
 // Reservation represents a car wash reservation
 type Reservation struct {
+	CodeVersion     int               `gorm:"not null;default:0" json:"-"`
+	CodeNonce       int               `gorm:"not null;default:0" json:"-"`
 	CodeHash        *string           `gorm:"uniqueIndex" json:"-"`
 	WhatsAppOptIn   bool              `json:"whatsapp_opt_in"`
 	QRVerifiedAt    *time.Time        `json:"qr_verified_at,omitempty"`
@@ -50,4 +53,16 @@ func (Reservation) TableName() string {
 // IsActive returns true if the reservation is not cancelled or completed
 func (r *Reservation) IsActive() bool {
 	return r.Status == ReservationStatusPending || r.Status == ReservationStatusConfirmed
+}
+
+// Number is a human-readable reference to the scheduled local time; ID remains the unique key.
+func (r Reservation) Number() string {
+	return r.StartTime.In(time.FixedZone("Argentina", -3*60*60)).Format("02012006-1504")
+}
+func (r Reservation) MarshalJSON() ([]byte, error) {
+	type plain Reservation
+	return json.Marshal(struct {
+		plain
+		Number string `json:"reservation_number"`
+	}{plain(r), r.Number()})
 }

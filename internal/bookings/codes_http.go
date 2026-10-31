@@ -51,18 +51,19 @@ func RegisterCodeRoutes(r *gin.RouterGroup, s *Service) {
 			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2048)
 			var input struct {
 				Code string `json:"code"`
+				Date string `json:"date"`
 				QR   string `json:"qr"`
 			}
-			if c.ShouldBindJSON(&input) != nil || len(input.Code) > 64 || len(input.QR) > 256 {
+			if c.ShouldBindJSON(&input) != nil || len(input.Date) > 10 || len(input.Code) > 64 || len(input.QR) > 256 {
 				c.JSON(400, gin.H{"error": "Revisá el código y el QR."})
 				return
 			}
 			var access ReservationAccess
 			var err error
 			if verify {
-				access, err = s.VerifySlotQR(c.Request.Context(), input.Code, input.QR)
+				access, err = s.VerifySlotQR(c.Request.Context(), input.Code, input.QR, input.Date)
 			} else {
-				access, err = s.LookupCode(c.Request.Context(), input.Code)
+				access, err = s.LookupCode(c.Request.Context(), input.Code, input.Date)
 			}
 			if err != nil {
 				status, message := 500, "No pudimos verificar la reserva. Reintentá."

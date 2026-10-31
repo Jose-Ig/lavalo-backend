@@ -29,6 +29,7 @@ func New(db *gorm.DB, cfg Config) *Service {
 }
 
 type View struct {
+	ReservationNumber  string `json:"reservation_number"`
 	Simulated          bool   `json:"simulated,omitempty"`
 	ConfirmationCode   string `json:"confirmation_code,omitempty"`
 	NotificationStatus string `json:"notification_status,omitempty"`
@@ -41,7 +42,7 @@ type View struct {
 func (s *Service) view(ctx context.Context, c Checkout, verified bool) (View, error) {
 	var r reservation.Reservation
 	e := s.DB.WithContext(ctx).First(&r, c.ReservationID).Error
-	v := View{Checkout: c, ReservationStatus: string(r.Status), Verified: verified}
+	v := View{ReservationNumber: r.Number(), Checkout: c, ReservationStatus: string(r.Status), Verified: verified}
 	if e != nil {
 		return v, e
 	}
