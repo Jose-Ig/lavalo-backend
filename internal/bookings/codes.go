@@ -8,12 +8,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
 	reservation "github.com/Jose-Ig/lavalo-backend/internal/reservations/domain/models"
 	slot "github.com/Jose-Ig/lavalo-backend/internal/slots/domain/models"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -206,19 +206,20 @@ func (s *Service) LookupCode(ctx context.Context, code string, dates ...string) 
 	}
 	return s.access(db, r)
 }
-func parseSlotQR(raw string) (uint, error) {
+func parseSlotQR(raw string) (string, error) {
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "uash" || u.Host != "slot" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return 0, ErrInvalid
+	if err != nil || u.Scheme != "uash" || u.Host != "slot" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return "", ErrInvalid
 	}
-	id, err := strconv.ParseUint(strings.TrimPrefix(u.Path, "/"), 10, 32)
-	if err != nil || id == 0 {
-		return 0, ErrInvalid
+	publicID := strings.TrimPrefix(u.Path, "/")
+	id, err := uuid.Parse(publicID)
+	if err != nil || id.Version() != 4 || id.Variant() != uuid.RFC4122 || id.String() != publicID || u.EscapedPath() != u.Path {
+		return "", ErrInvalid
 	}
-	return uint(id), nil
+	return publicID, nil
 }
 func (s *Service) VerifySlotQR(ctx context.Context, code, qr string, dates ...string) (ReservationAccess, error) {
-	slotID, err := parseSlotQR(qr)
+	publicID, err := parseSlotQR(qr)
 	if err != nil {
 		return ReservationAccess{}, err
 	}
@@ -232,9 +233,7 @@ func (s *Service) VerifySlotQR(ctx context.Context, code, qr string, dates ...st
 		if err != nil {
 			return err
 		}
-		if r.SlotID != slotID {
-			return ErrConflict
-		}
+		assignedSlotID := r.SlotID
 		if err = tx.Model(&slot.Slot{}).Where("id = ?", r.SlotID).Update("updated_at", s.Now()).Error; err != nil {
 			return err
 		}
@@ -244,7 +243,14 @@ func (s *Service) VerifySlotQR(ctx context.Context, code, qr string, dates ...st
 		if err = tx.First(&r, r.ID).Error; err != nil {
 			return err
 		}
-		if r.SlotID != slotID {
+		if r.SlotID != assignedSlotID {
+			return ErrConflict
+		}
+		var assignedSlot slot.Slot
+		if err := tx.First(&assignedSlot, r.SlotID).Error; err != nil {
+			return err
+		}
+		if assignedSlot.PublicID != publicID {
 			return ErrConflict
 		}
 		result, err = s.access(tx, r)

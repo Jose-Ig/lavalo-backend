@@ -164,6 +164,9 @@ func initDatabase(cfg *common.Config) (*gorm.DB, error) {
 func runMigrations(db *gorm.DB) error {
 	common.Logger.Info("Running database migrations...")
 
+	if err := slotModels.PreparePublicIDs(db); err != nil {
+		return fmt.Errorf("failed to prepare slot public IDs: %w", err)
+	}
 	err := db.AutoMigrate(
 		&reservationModels.Reservation{},
 		&slotModels.Slot{},

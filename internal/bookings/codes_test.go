@@ -100,32 +100,32 @@ func TestQRRequiresCorrectPaidReservationSpaceAndTime(t *testing.T) {
 	s, r, _ := confirmedFixture(t)
 	code := ConfirmationCode(*r)
 	ctx := context.Background()
-	if _, e := s.VerifySlotQR(ctx, code, "uash://slot/1"); !errors.Is(e, ErrConflict) {
+	if _, e := s.VerifySlotQR(ctx, code, testSlotQR(t, s)); !errors.Is(e, ErrConflict) {
 		t.Fatal("early access accepted", e)
 	}
 	now := r.StartTime
 	s.Now = func() time.Time { return now }
-	if _, e := s.VerifySlotQR(ctx, code, "uash://slot/2"); !errors.Is(e, ErrConflict) {
+	if _, e := s.VerifySlotQR(ctx, code, "uash://slot/aef3954a-a1d3-42d0-978f-e50e6f81cb03"); !errors.Is(e, ErrConflict) {
 		t.Fatal("wrong space accepted", e)
 	}
 	if _, e := s.VerifySlotQR(ctx, code, "https://evil.example/1"); !errors.Is(e, ErrInvalid) {
 		t.Fatal("arbitrary QR accepted", e)
 	}
-	first, e := s.VerifySlotQR(ctx, code, "uash://slot/1")
+	first, e := s.VerifySlotQR(ctx, code, testSlotQR(t, s))
 	if e != nil || first.QRVerifiedAt == nil || first.ActivationStatus != "awaiting_controller" {
 		t.Fatal(first, e)
 	}
-	second, e := s.VerifySlotQR(ctx, code, "uash://slot/1")
+	second, e := s.VerifySlotQR(ctx, code, testSlotQR(t, s))
 	if e != nil || !second.QRVerifiedAt.Equal(*first.QRVerifiedAt) {
 		t.Fatal("QR replay changed check-in", e)
 	}
 	now = r.EndTime
-	if _, e = s.VerifySlotQR(ctx, code, "uash://slot/1"); !errors.Is(e, ErrConflict) {
+	if _, e = s.VerifySlotQR(ctx, code, testSlotQR(t, s)); !errors.Is(e, ErrConflict) {
 		t.Fatal("expired access accepted", e)
 	}
 	now = r.StartTime
 	s.DB.Model(r).Update("status", "cancelled")
-	if _, e = s.VerifySlotQR(ctx, code, "uash://slot/1"); !errors.Is(e, ErrConflict) {
+	if _, e = s.VerifySlotQR(ctx, code, testSlotQR(t, s)); !errors.Is(e, ErrConflict) {
 		t.Fatal("cancelled access accepted", e)
 	}
 }
@@ -186,10 +186,10 @@ func TestDailyCodeRequiresCorrectDateForLookupAndQR(t *testing.T) {
 	}
 	now := r.StartTime
 	s.Now = func() time.Time { return now }
-	if _, err := s.VerifySlotQR(context.Background(), code, "uash://slot/1", wrong); !errors.Is(err, gorm.ErrRecordNotFound) {
+	if _, err := s.VerifySlotQR(context.Background(), code, testSlotQR(t, s), wrong); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatal("QR ignored date", err)
 	}
-	got, err := s.VerifySlotQR(context.Background(), code, "uash://slot/1", day)
+	got, err := s.VerifySlotQR(context.Background(), code, testSlotQR(t, s), day)
 	if err != nil || got.ReservationDate != day || got.ReservationNumber != r.Number() {
 		t.Fatal(got, err)
 	}
@@ -314,5 +314,26 @@ func TestOptionalEmailIsValidatedAndStored(t *testing.T) {
 	stored, err := s.Get(context.Background(), r.ID, token)
 	if err != nil || stored.Email != "guest@example.com" || !stored.WhatsAppOptIn {
 		t.Fatal("email/default WhatsApp not persisted", err)
+	}
+}
+
+func testSlotQR(t *testing.T, s *Service) string {
+	t.Helper()
+	var sl struct{ PublicID string }
+	if err := s.DB.Table("slots").Select("public_id").Where("id = ?", 1).Take(&sl).Error; err != nil {
+		t.Fatal(err)
+	}
+	return "uash://slot/" + sl.PublicID
+}
+
+func TestSlotQRRejectsPredictableAndMalformedIdentifiers(t *testing.T) {
+	for _, qr := range []string{
+		"uash://slot/1", "uash://slot/0", "uash://slot/00000000-0000-0000-0000-000000000000",
+		"uash://slot/aef3954a-a1d3-42d0-978f-e50e6f81cb03?", "uash://slot/aef3954a-a1d3-42d0-978f-e50e6f81cb03/",
+		"https://slot/aef3954a-a1d3-42d0-978f-e50e6f81cb03", "uash://slot/aef3954aa1d342d0978fe50e6f81cb03",
+	} {
+		if _, err := parseSlotQR(qr); !errors.Is(err, ErrInvalid) {
+			t.Errorf("accepted QR %q: %v", qr, err)
+		}
 	}
 }
