@@ -12,7 +12,7 @@ No se generan códigos de acceso válidos para reservas pendientes de pago o pag
 
 POST /api/v1/reservations/lookup recibe {"code":"123456","date":"2026-10-31"}. No necesita sesión del dispositivo.
 Devuelve solo el turno, espacio y estado de habilitación; no expone token de pago, email ni teléfono.
-POST /api/v1/reservations/verify-slot recibe {"code":"123456","date":"2026-10-31","qr":"uash://slot/1"}.
+POST /api/v1/reservations/verify-slot recibe {"code":"123456","date":"2026-10-31","qr":"uash://slot/<public_id UUID>"}.
 Comprueba el código, pago confirmado, espacio exacto, disponibilidad y horario [inicio, fin).
 Repetir un QR válido no duplica la verificación. No permite usar un código cancelado o fuera de horario.
 Los endpoints limitan intentos a 60/minuto por conexión IP, con memoria acotada. Para despliegues con
@@ -22,7 +22,11 @@ El QR estático identifica el espacio, no prueba presencia física ni enciende e
 La respuesta awaiting_controller deja explícito que falta conectar el controlador del lavadero.
 Antes de un comando físico real, la integración deberá verificar otra vez pago/horario, usar comandos
 idempotentes y confirmar la respuesta del equipo. La app no muestra un servicio activo ni un temporizador ficticio.
-Para probar la cámara se puede generar un QR con el texto exacto uash://slot/1 (cambiar el ID por el asignado).
+Los espacios conservan su ID numérico interno y tienen un `public_id` UUID v4 único y estable,
+asignado automáticamente al crearlos o migrar los existentes. El QR usa `uash://slot/<public_id>`;
+los identificadores numéricos del formato anterior se rechazan. El reinicio no rota los UUIDs.
+Los [cuatro carteles de staging y su instalación](staging-slot-qrs/README.md) incluyen el SQL
+que debe aplicarse antes del primer despliegue para asociar estos archivos a los espacios 1–4.
 
 ## Avisos: pendientes de proveedor
 
