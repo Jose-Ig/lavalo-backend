@@ -45,7 +45,10 @@ func (s *Service) view(ctx context.Context, c Checkout, verified bool) (View, er
 	if e != nil {
 		return v, e
 	}
-	if r.Status == "confirmed" && c.State == "completed" && verified {
+	if r.ParentReservationID != nil && r.Status == "completed" && c.State == "completed" && verified {
+		v.ReservationStatus = "confirmed"
+	}
+	if r.ParentReservationID == nil && r.Status == "confirmed" && c.State == "completed" && verified {
 		err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error { return bookings.EnsureConfirmation(tx, &r) })
 		if err != nil {
 			return v, err

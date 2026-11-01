@@ -122,6 +122,49 @@ func RegisterCodeRoutes(r *gin.RouterGroup, s *Service) {
 			c.JSON(200, gin.H{"data": data})
 		}
 	}
+	extension := func(create bool) gin.HandlerFunc {
+		return func(c *gin.Context) {
+			c.Header("Cache-Control", "no-store")
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2048)
+			var input struct {
+				Code    string `json:"code"`
+				Date    string `json:"date"`
+				Minutes int    `json:"minutes"`
+			}
+			if c.ShouldBindJSON(&input) != nil || len(input.Code) > 64 || len(input.Date) > 10 {
+				c.JSON(400, gin.H{"error": "Revisá los datos de la reserva."})
+				return
+			}
+			var data any
+			var token string
+			var err error
+			if create {
+				data, token, err = s.CreateExtension(c.Request.Context(), input.Code, input.Date, input.Minutes)
+			} else {
+				data, err = s.ExtensionOptions(c.Request.Context(), input.Code, input.Date)
+			}
+			if err != nil {
+				status, message := 500, "No pudimos consultar el tiempo adicional. Reintentá."
+				switch {
+				case errors.Is(err, gorm.ErrRecordNotFound):
+					status, message = 404, "No encontramos la reserva."
+				case errors.Is(err, ErrInvalid):
+					status, message = 400, "Elegí 15, 30 o 60 minutos."
+				case errors.Is(err, ErrConflict):
+					status, message = 409, "No hay disponibilidad o el turno ya terminó. Consultá nuevamente la reserva."
+				}
+				c.JSON(status, gin.H{"error": message})
+				return
+			}
+			if create {
+				c.JSON(201, gin.H{"data": data, "access_token": token})
+			} else {
+				c.JSON(200, gin.H{"data": data})
+			}
+		}
+	}
+	r.POST("/reservations/extensions/availability", limit, extension(false))
+	r.POST("/reservations/extensions", limit, extension(true))
 	r.POST("/reservations/reschedule/availability", limit, reschedule(true))
 	r.POST("/reservations/reschedule", limit, reschedule(false))
 	r.POST("/reservations/lookup", limit, handle(false))

@@ -162,6 +162,11 @@ func (s *Service) Apply(ctx context.Context, o Order) error {
 		if e := tx.Model(&slot.Slot{}).Where("id = ?", r.SlotID).Update("updated_at", s.Now()).Error; e != nil {
 			return e
 		}
+		if r.ParentReservationID != nil {
+			if e := tx.Model(&reservation.Reservation{}).Where("id = ?", *r.ParentReservationID).Update("updated_at", s.Now()).Error; e != nil {
+				return e
+			}
+		}
 		if e := tx.Model(&reservation.Reservation{}).Where("id = ?", r.ID).Update("updated_at", s.Now()).Error; e != nil {
 			return e
 		}
@@ -198,6 +203,9 @@ func (s *Service) Apply(ctx context.Context, o Order) error {
 			state = "review"
 			issue = checkout.Issue
 		}
+		if r.ParentReservationID != nil && (state == "refunded" || issue == "partial_refund") && r.Status == "completed" {
+			state, issue = "review", "extension_refund_after_service"
+		}
 		if state == "refunded" || issue == "partial_refund" {
 			if r.Status == "confirmed" {
 				r.Status = "cancelled"
@@ -225,7 +233,26 @@ func (s *Service) Apply(ctx context.Context, o Order) error {
 					issue = "slot_unavailable"
 					break
 				}
-				r.Status = "confirmed"
+				if r.ParentReservationID != nil {
+					var parent reservation.Reservation
+					if e := tx.First(&parent, *r.ParentReservationID).Error; e != nil {
+						return e
+					}
+					var enabledSlot slot.Slot
+					if e := tx.First(&enabledSlot, r.SlotID).Error; e != nil {
+						return e
+					}
+					if !enabledSlot.IsAvailable || parent.Status != "confirmed" || parent.QRVerifiedAt == nil || parent.SlotID != r.SlotID || !parent.EndTime.Equal(r.StartTime) || !s.Now().Before(parent.EndTime) {
+						state, issue = "review", "extension_unavailable"
+						break
+					}
+					if e := tx.Model(&parent).Updates(map[string]any{"end_time": r.EndTime, "duration_minutes": parent.DurationMinutes + r.DurationMinutes}).Error; e != nil {
+						return e
+					}
+					r.Status = "completed"
+				} else {
+					r.Status = "confirmed"
+				}
 				r.ExpiresAt = nil
 			default:
 				state = "review"
