@@ -56,9 +56,17 @@ func (r *Reservation) IsActive() bool {
 	return r.Status == ReservationStatusPending || r.Status == ReservationStatusConfirmed
 }
 
-// Number is a human-readable reference to the scheduled local time; ID remains the unique key.
+// Number is the public reservation ID: customer code plus the scheduled local date.
+// Pending reservations have no public ID until payment allocates their code.
 func (r Reservation) Number() string {
-	return r.StartTime.In(time.FixedZone("Argentina", -3*60*60)).Format("02012006-1504")
+	if r.CodeHash == nil {
+		return ""
+	}
+	code := r.ConfirmationCode()
+	if code == "" {
+		return ""
+	}
+	return code + "-" + r.StartTime.In(time.FixedZone("Argentina", -3*60*60)).Format("020106")
 }
 func (r Reservation) MarshalJSON() ([]byte, error) {
 	type plain Reservation

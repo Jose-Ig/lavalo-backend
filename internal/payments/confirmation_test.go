@@ -473,3 +473,34 @@ func TestHistoricalMockCheckoutIsNotVerifiedAsProviderPayment(t *testing.T) {
 		t.Fatal("historical simulation accepted", err)
 	}
 }
+
+func TestConfirmedPaymentSeparatesPublicIDAndSixDigitCode(t *testing.T) {
+	s, f, id, token := fixture(t)
+	ctx := context.Background()
+	pending, err := s.Start(ctx, id, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.ReservationNumber != "" || pending.ConfirmationCode != "" {
+		t.Fatal("unpaid code exposed")
+	}
+	var c Checkout
+	s.DB.Where("reservation_id = ?", id).First(&c)
+	order := approved(s, c)
+	f.set(order)
+	view, err := s.Status(ctx, id, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r reservation.Reservation
+	s.DB.First(&r, id)
+	code := bookings.ConfirmationCode(r)
+	if len(code) != 6 || view.ConfirmationCode != code || view.ReservationNumber != code+"-"+r.StartTime.In(bookings.Location).Format("020106") {
+		t.Fatal("incorrect ID or customer code", view.ReservationNumber, view.ConfirmationCode)
+	}
+	for _, c := range code {
+		if c < '0' || c > '9' {
+			t.Fatal("non-numeric code")
+		}
+	}
+}

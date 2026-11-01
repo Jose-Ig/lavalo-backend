@@ -53,6 +53,7 @@ func (s *Service) view(ctx context.Context, c Checkout, verified bool) (View, er
 		if err != nil {
 			return v, err
 		}
+		v.ReservationNumber = r.Number()
 		v.ConfirmationCode = bookings.ConfirmationCode(r)
 		v.NotificationStatus = "pending_configuration"
 	}

@@ -73,7 +73,7 @@ func main() {
 			log.Fatal("seed-slots requires debug mode")
 		}
 		for id := 1; id <= *seedSlots; id++ {
-			sl := slotModels.Slot{ID: uint(id), Label: fmt.Sprintf("Espacio %d", id), IsAvailable: true}
+			sl := slotModels.Slot{ID: uint(id), Label: fmt.Sprintf("Espacio N° %d", id), IsAvailable: true}
 			if err := db.FirstOrCreate(&sl, uint(id)).Error; err != nil {
 				log.Fatal(err)
 			}

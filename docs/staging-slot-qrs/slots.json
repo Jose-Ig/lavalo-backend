@@ -3,22 +3,22 @@
   "slots": [
     {
       "id": 1,
-      "label": "Espacio 1",
+      "label": "Espacio N° 1",
       "public_id": "1493790d-6574-4a92-8445-afd174027bc0"
     },
     {
       "id": 2,
-      "label": "Espacio 2",
+      "label": "Espacio N° 2",
       "public_id": "2402c8d5-c224-4ef1-8f4d-d2c19f85ab7a"
     },
     {
       "id": 3,
-      "label": "Espacio 3",
+      "label": "Espacio N° 3",
       "public_id": "7491ec4c-9a89-4ebe-95d6-6f4c87c3329a"
     },
     {
       "id": 4,
-      "label": "Espacio 4",
+      "label": "Espacio N° 4",
       "public_id": "bc1b69aa-d22f-4aae-a560-fea75eac64a9"
     }
   ]

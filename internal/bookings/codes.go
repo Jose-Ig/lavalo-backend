@@ -3,10 +3,7 @@ package bookings
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base32"
-	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -29,29 +26,9 @@ type NotificationIntent struct {
 	UpdatedAt     time.Time
 }
 
-var codeAlphabet = base32.NewEncoding("23456789ABCDEFGHJKLMNPQRSTUVWXYZ").WithPadding(base32.NoPadding)
-
-// Each reservation already has an independent 256-bit random capability (stored hashed).
-// Domain-separated derivation makes its customer code stable without storing plaintext codes.
-func ConfirmationCode(r reservation.Reservation) string {
-	code := confirmationBase(r)
-	if code != "" && r.CodeVersion == 2 {
-		return code + "-" + r.StartTime.In(Location).Format("020106")
-	}
-	return code
-}
-func confirmationBase(r reservation.Reservation) string {
-	if len(r.AccessTokenHash) != 64 || r.ID == 0 {
-		return ""
-	}
-	if r.CodeVersion == 2 {
-		digest := sha256.Sum256([]byte(fmt.Sprintf("uash:confirmation:v2:%d:%s:%d", r.ID, r.AccessTokenHash, r.CodeNonce)))
-		return fmt.Sprintf("%06d", binary.BigEndian.Uint64(digest[:8])%1000000)
-	}
-	digest := sha256.Sum256([]byte(fmt.Sprintf("uash:confirmation:v1:%d:%s", r.ID, r.AccessTokenHash)))
-	raw := codeAlphabet.EncodeToString(digest[:10]) // 80 bits, 16 printable characters.
-	return "UASH-" + raw[:4] + "-" + raw[4:8] + "-" + raw[8:12] + "-" + raw[12:]
-}
+// ConfirmationCode is the six-digit customer capability used for lookup and notifications.
+// Historical long codes remain valid for existing reservations.
+func ConfirmationCode(r reservation.Reservation) string { return r.ConfirmationCode() }
 func normalizeCode(code string) string {
 	return strings.ToUpper(strings.NewReplacer("-", "", " ", "", "\t", "", "\n", "", "\r", "").Replace(strings.TrimSpace(code)))
 }
@@ -210,7 +187,7 @@ func (s *Service) access(db *gorm.DB, r reservation.Reservation) (ReservationAcc
 	if r.QRVerifiedAt != nil {
 		activation = "awaiting_controller"
 	}
-	return ReservationAccess{CanReschedule: s.canReschedule(r), ReservationNumber: r.Number(), ReservationDate: r.StartTime.In(Location).Format("2006-01-02"), ID: r.ID, Code: ConfirmationCode(r), SlotID: r.SlotID, SlotLabel: sl.Label, StartTime: r.StartTime, EndTime: r.EndTime, Duration: r.DurationMinutes, Status: r.Status, CanVerifyQR: reason == "ready", ActivationReason: reason, QRVerifiedAt: r.QRVerifiedAt, ActivationStatus: activation}, nil
+	return ReservationAccess{CanReschedule: s.canReschedule(r), ReservationNumber: r.Number(), ReservationDate: r.StartTime.In(Location).Format("2006-01-02"), ID: r.ID, Code: ConfirmationCode(r), SlotID: r.SlotID, SlotLabel: sl.DisplayLabel(), StartTime: r.StartTime, EndTime: r.EndTime, Duration: r.DurationMinutes, Status: r.Status, CanVerifyQR: reason == "ready", ActivationReason: reason, QRVerifiedAt: r.QRVerifiedAt, ActivationStatus: activation}, nil
 }
 func (s *Service) LookupCode(ctx context.Context, code string, dates ...string) (ReservationAccess, error) {
 	db := s.DB.WithContext(ctx)

@@ -41,7 +41,7 @@ func TestIndependentCodesAndIdempotentNotificationIntents(t *testing.T) {
 	s, r, _ := confirmedFixture(t)
 	ctx := context.Background()
 	code := ConfirmationCode(*r)
-	if code == "" || len(code) != 13 {
+	if code == "" || len(code) != 6 {
 		t.Fatal("invalid confirmation code")
 	}
 	for i := 0; i < 2; i++ {
@@ -263,7 +263,7 @@ func TestShortCodeKeepsLeadingZeroAndLocalReservationNumber(t *testing.T) {
 	for nonce := 0; nonce < 1000; nonce++ {
 		r.CodeNonce = nonce
 		code := ConfirmationCode(r)
-		if len(code) != 13 {
+		if len(code) != 6 {
 			t.Fatal("code length", code)
 		}
 		if code[0] == '0' {
@@ -275,11 +275,10 @@ func TestShortCodeKeepsLeadingZeroAndLocalReservationNumber(t *testing.T) {
 		t.Fatal("leading zero was lost")
 	}
 	r.StartTime = time.Date(2026, 11, 1, 1, 30, 0, 0, time.UTC)
-	if !strings.HasSuffix(ConfirmationCode(r), "-311026") {
-		t.Fatal("wrong local code suffix", ConfirmationCode(r))
-	}
-	if r.Number() != "31102026-2230" {
-		t.Fatal("wrong Argentina date/time", r.Number())
+	hash := "allocated"
+	r.CodeHash = &hash
+	if r.Number() != ConfirmationCode(r)+"-311026" {
+		t.Fatal("wrong Argentina reservation ID", r.Number())
 	}
 }
 
@@ -341,17 +340,31 @@ func TestSlotQRRejectsPredictableAndMalformedIdentifiers(t *testing.T) {
 	}
 }
 
-func TestDatedCodesKeepExistingSixDigitCodesWorking(t *testing.T) {
+func TestReservationIDAndCustomerCodeAreSeparate(t *testing.T) {
 	s, r, _ := confirmedFixture(t)
 	code := ConfirmationCode(*r)
 	day := r.StartTime.In(Location).Format("2006-01-02")
-	if len(code) != 13 || code[6] != '-' || code[7:] != r.StartTime.In(Location).Format("020106") {
-		t.Fatal("invalid dated code", code)
+	number := code + "-" + r.StartTime.In(Location).Format("020106")
+	if len(code) != 6 || r.Number() != number {
+		t.Fatal("wrong public ID/code", r.Number(), code)
 	}
-	if got, err := s.LookupCode(context.Background(), code[:6], day); err != nil || got.ID != r.ID || got.Code != code {
-		t.Fatal("historical short code rejected", got, err)
+	for _, input := range []string{code, number} {
+		got, err := s.LookupCode(context.Background(), input, day)
+		if err != nil || got.ID != r.ID || got.Code != code || got.ReservationNumber != number {
+			t.Fatal("lookup ID/code mismatch", got, err)
+		}
 	}
-	if _, err := s.LookupCode(context.Background(), code[:7]+"010100", day); !errors.Is(err, gorm.ErrRecordNotFound) {
-		t.Fatal("wrong suffix accepted", err)
+	if _, err := s.LookupCode(context.Background(), code+"-010100", day); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatal("wrong date accepted", err)
+	}
+}
+func TestPendingReservationDoesNotExposeConfirmationCodeInPublicID(t *testing.T) {
+	s, i := fixture(t)
+	r, _, err := s.Create(context.Background(), i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Number() != "" {
+		t.Fatal("unpaid code exposed via public ID", r.Number())
 	}
 }
