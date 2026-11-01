@@ -25,7 +25,7 @@ func TestRescheduleKeepsPaidBookingAndCodeAndReleasesOldTime(t *testing.T) {
 	}
 	next := r.StartTime.AddDate(0, 0, 1)
 	result, err := s.Reschedule(ctx, code, oldDay, r.SlotID, next)
-	if err != nil || result.ID != r.ID || result.Code != code || result.Status != "confirmed" || result.Duration != r.DurationMinutes || result.ReservationNumber != next.In(Location).Format("02012006-1504") {
+	if err != nil || result.ID != r.ID || result.Code[:6] != code[:6] || result.Code[7:] != next.In(Location).Format("020106") || result.Status != "confirmed" || result.Duration != r.DurationMinutes || result.ReservationNumber != next.In(Location).Format("02012006-1504") {
 		t.Fatal(result, err)
 	}
 	stored, err := s.Get(ctx, r.ID, token)
@@ -35,7 +35,7 @@ func TestRescheduleKeepsPaidBookingAndCodeAndReleasesOldTime(t *testing.T) {
 	if _, err = s.LookupCode(ctx, code, oldDay); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatal("old date accepted", err)
 	}
-	if _, err = s.LookupCode(ctx, code, result.ReservationDate); err != nil {
+	if _, err = s.LookupCode(ctx, result.Code, result.ReservationDate); err != nil {
 		t.Fatal(err)
 	}
 	free, err := s.Available(ctx, r.StartTime, r.DurationMinutes)
@@ -127,7 +127,7 @@ func TestRescheduleResolvesDailyCodeCollision(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := s.Reschedule(context.Background(), code, oldDay, r.SlotID, next)
-	if err != nil || result.Code == code || len(result.Code) != 6 {
+	if err != nil || result.Code == code || len(result.Code) != 13 {
 		t.Fatal("collision not resolved", result, err)
 	}
 	if _, err = s.LookupCode(context.Background(), result.Code, result.ReservationDate); err != nil {

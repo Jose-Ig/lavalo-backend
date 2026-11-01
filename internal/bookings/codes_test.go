@@ -41,7 +41,7 @@ func TestIndependentCodesAndIdempotentNotificationIntents(t *testing.T) {
 	s, r, _ := confirmedFixture(t)
 	ctx := context.Background()
 	code := ConfirmationCode(*r)
-	if code == "" || len(code) != 6 {
+	if code == "" || len(code) != 13 {
 		t.Fatal("invalid confirmation code")
 	}
 	for i := 0; i < 2; i++ {
@@ -263,7 +263,7 @@ func TestShortCodeKeepsLeadingZeroAndLocalReservationNumber(t *testing.T) {
 	for nonce := 0; nonce < 1000; nonce++ {
 		r.CodeNonce = nonce
 		code := ConfirmationCode(r)
-		if len(code) != 6 {
+		if len(code) != 13 {
 			t.Fatal("code length", code)
 		}
 		if code[0] == '0' {
@@ -275,6 +275,9 @@ func TestShortCodeKeepsLeadingZeroAndLocalReservationNumber(t *testing.T) {
 		t.Fatal("leading zero was lost")
 	}
 	r.StartTime = time.Date(2026, 11, 1, 1, 30, 0, 0, time.UTC)
+	if !strings.HasSuffix(ConfirmationCode(r), "-311026") {
+		t.Fatal("wrong local code suffix", ConfirmationCode(r))
+	}
 	if r.Number() != "31102026-2230" {
 		t.Fatal("wrong Argentina date/time", r.Number())
 	}
@@ -335,5 +338,20 @@ func TestSlotQRRejectsPredictableAndMalformedIdentifiers(t *testing.T) {
 		if _, err := parseSlotQR(qr); !errors.Is(err, ErrInvalid) {
 			t.Errorf("accepted QR %q: %v", qr, err)
 		}
+	}
+}
+
+func TestDatedCodesKeepExistingSixDigitCodesWorking(t *testing.T) {
+	s, r, _ := confirmedFixture(t)
+	code := ConfirmationCode(*r)
+	day := r.StartTime.In(Location).Format("2006-01-02")
+	if len(code) != 13 || code[6] != '-' || code[7:] != r.StartTime.In(Location).Format("020106") {
+		t.Fatal("invalid dated code", code)
+	}
+	if got, err := s.LookupCode(context.Background(), code[:6], day); err != nil || got.ID != r.ID || got.Code != code {
+		t.Fatal("historical short code rejected", got, err)
+	}
+	if _, err := s.LookupCode(context.Background(), code[:7]+"010100", day); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatal("wrong suffix accepted", err)
 	}
 }

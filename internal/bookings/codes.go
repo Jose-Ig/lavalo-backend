@@ -34,6 +34,13 @@ var codeAlphabet = base32.NewEncoding("23456789ABCDEFGHJKLMNPQRSTUVWXYZ").WithPa
 // Each reservation already has an independent 256-bit random capability (stored hashed).
 // Domain-separated derivation makes its customer code stable without storing plaintext codes.
 func ConfirmationCode(r reservation.Reservation) string {
+	code := confirmationBase(r)
+	if code != "" && r.CodeVersion == 2 {
+		return code + "-" + r.StartTime.In(Location).Format("020106")
+	}
+	return code
+}
+func confirmationBase(r reservation.Reservation) string {
 	if len(r.AccessTokenHash) != 64 || r.ID == 0 {
 		return ""
 	}
@@ -137,7 +144,11 @@ type ReservationAccess struct {
 }
 
 func dailyCodeHash(day, code string) string {
-	return codeHash("uash:daily:v2:" + day + ":" + normalizeCode(code))
+	normalized := normalizeCode(code)
+	if len(normalized) == 12 {
+		normalized = normalized[:6]
+	}
+	return codeHash("uash:daily:v2:" + day + ":" + normalized)
 }
 func (s *Service) lookupDay(dates []string) (string, error) {
 	day := s.Now().In(Location).Format("2006-01-02")
@@ -153,6 +164,13 @@ func (s *Service) lookupDay(dates []string) (string, error) {
 func (s *Service) findByCode(db *gorm.DB, code, day string) (reservation.Reservation, error) {
 	var r reservation.Reservation
 	normalized := normalizeCode(code)
+	if len(normalized) == 12 {
+		parsed, err := time.ParseInLocation("2006-01-02", day, Location)
+		if err != nil || normalized[6:] != parsed.Format("020106") {
+			return r, gorm.ErrRecordNotFound
+		}
+		normalized = normalized[:6]
+	}
 	if len(normalized) == 6 {
 		for _, c := range normalized {
 			if c < '0' || c > '9' {
