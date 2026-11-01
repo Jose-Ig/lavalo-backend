@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/Jose-Ig/lavalo-backend/internal/bookings"
 	reservation "github.com/Jose-Ig/lavalo-backend/internal/reservations/domain/models"
+	slot "github.com/Jose-Ig/lavalo-backend/internal/slots/domain/models"
 	"testing"
 	"time"
 )
@@ -25,8 +26,15 @@ func extensionFixture(t *testing.T) (*Service, *fakeGateway, *reservation.Reserv
 	now := parent.StartTime.Add(time.Minute)
 	s.Now = func() time.Time { return now }
 	s.Bookings.Now = s.Now
-	s.DB.Model(&parent).Update("qr_verified_at", now)
-	parent.QRVerifiedAt = &now
+	var assigned slot.Slot
+	if err := s.DB.First(&assigned, parent.SlotID).Error; err != nil {
+		t.Fatal(err)
+	}
+	access, err := s.Bookings.VerifySlotQR(ctx, bookings.ConfirmationCode(parent), "uash://slot/"+assigned.PublicID, parent.StartTime.In(bookings.Location).Format("2006-01-02"))
+	if err != nil || access.ActivationStatus != "simulated" {
+		t.Fatal("QR did not start simulation", access, err)
+	}
+	parent.QRVerifiedAt = access.QRVerifiedAt
 	child, secret, err := s.Bookings.CreateExtension(ctx, bookings.ConfirmationCode(parent), parent.StartTime.In(bookings.Location).Format("2006-01-02"), 15)
 	if err != nil {
 		t.Fatal(err)
@@ -61,6 +69,10 @@ func TestExtensionPaymentMergesOnceAndPreservesOriginalCode(t *testing.T) {
 	s.DB.First(&got, parent.ID)
 	if !got.EndTime.Equal(child.EndTime) || got.DurationMinutes != parent.DurationMinutes+15 || bookings.ConfirmationCode(got) != code || got.QRVerifiedAt == nil {
 		t.Fatal("incorrect merge", got)
+	}
+	access, err := s.Bookings.LookupCode(ctx, code, got.StartTime.In(bookings.Location).Format("2006-01-02"))
+	if err != nil || access.ActivationStatus != "simulated" || !access.EndTime.Equal(child.EndTime) || access.Duration != parent.DurationMinutes+15 {
+		t.Fatal("paid time not visible to countdown", access, err)
 	}
 	s.DB.First(child, child.ID)
 	if child.Status != "completed" {

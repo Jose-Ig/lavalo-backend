@@ -112,8 +112,12 @@ func TestQRRequiresCorrectPaidReservationSpaceAndTime(t *testing.T) {
 		t.Fatal("arbitrary QR accepted", e)
 	}
 	first, e := s.VerifySlotQR(ctx, code, testSlotQR(t, s))
-	if e != nil || first.QRVerifiedAt == nil || first.ActivationStatus != "awaiting_controller" {
+	if e != nil || first.QRVerifiedAt == nil || first.ActivationStatus != "simulated" {
 		t.Fatal(first, e)
+	}
+	restored, e := s.LookupCode(ctx, code)
+	if e != nil || restored.ActivationStatus != "simulated" || restored.QRVerifiedAt == nil || restored.CanReschedule || !restored.EndTime.Equal(r.EndTime) {
+		t.Fatal("simulation did not survive lookup", restored, e)
 	}
 	second, e := s.VerifySlotQR(ctx, code, testSlotQR(t, s))
 	if e != nil || !second.QRVerifiedAt.Equal(*first.QRVerifiedAt) {

@@ -19,7 +19,7 @@ Los endpoints limitan intentos a 60/minuto por conexión IP, con memoria acotada
 varias instancias debe reemplazarse por un limitador distribuido y definir proxies confiables.
 
 El QR estático identifica el espacio, no prueba presencia física ni enciende el equipo.
-La respuesta awaiting_controller deja explícito que falta conectar el controlador del lavadero.
+Para probar el flujo sin Arduino, un QR válido devuelve `activation_status: simulated`. El check-in queda guardado en `qr_verified_at` y habilita la cuenta regresiva y la compra de tiempo sin esperar al controlador. No se envían comandos físicos.
 Antes de un comando físico real, la integración deberá verificar otra vez pago/horario, usar comandos
 idempotentes y confirmar la respuesta del equipo. La app muestra una cuenta regresiva hasta `end_time` después de validar el QR, sin afirmar que el equipo se encendió.
 Los espacios conservan su ID numérico interno y tienen un `public_id` UUID v4 único y estable,
@@ -55,7 +55,7 @@ Reiniciar Metro con npx expo start --clear. Una development build anterior neces
 3. Tengo una reserva siempre solicita un código; no consulta automáticamente el checkout guardado.
 4. Consultar cualquiera de los códigos, incluso desde otro dispositivo conectado al mismo backend.
 5. Dentro del horario reservado, escanear el QR del espacio correcto; uno distinto debe rechazarse.
-6. El escaneo abre una modal desde Tengo una reserva; al validarse se oculta Editar reserva y aparece la cuenta regresiva en negro. La activación física sigue pendiente.
+6. El escaneo abre una modal desde Tengo una reserva; al validarse se oculta Editar reserva y aparece la cuenta regresiva en negro. Se muestra “Modo de prueba: equipo simulado.”; no requiere un Arduino conectado.
 Los envíos por WhatsApp/email quedan pendientes hasta elegir/configurar sus proveedores.
 
 ## Pago por Mercado Pago
@@ -113,3 +113,9 @@ La confirmación de pago bloquea el espacio, la reserva original y la ampliació
 En mobile se abre Pago para la ampliación y se vuelve a Tengo una reserva. Se reconcilia el checkout actual solo si corresponde a la reserva consultada explícitamente, y se vuelve a consultar el fin en backend. No se recuperan reservas ajenas ni se simulan aprobaciones.
 
 Las etiquetas numéricas de espacios se muestran como `Espacio N° n`, incluso cuando una base existente conserva `Espacio n`. Este cambio no modifica los IDs internos ni los UUIDs/QR de espacios.
+
+## Simulación de controlador para pruebas
+
+El escaneo sigue validando código, fecha, pago confirmado, espacio habilitado y horario `[inicio, fin)`. Solo después registra el check-in y devuelve `simulated`, también en consultas posteriores. La cuenta regresiva usa `end_time` del servidor; volver a escanear no reinicia el tiempo. Se oculta Editar reserva y se habilita Agregar más tiempo durante el turno vigente.
+
+La disponibilidad y los pagos adicionales siguen usando el flujo real de reservas y Mercado Pago. Solo la respuesta del Arduino se simula: no se aprueban pagos automáticamente, no se agregan minutos gratis y no se modifica el horario original al escanear. Al confirmarse un pago adicional se actualiza el fin de la reserva y la app refresca la cuenta regresiva.

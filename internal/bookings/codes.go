@@ -185,7 +185,8 @@ func (s *Service) access(db *gorm.DB, r reservation.Reservation) (ReservationAcc
 	}
 	activation := "not_started"
 	if r.QRVerifiedAt != nil {
-		activation = "awaiting_controller"
+		// Test flow: a valid check-in simulates controller acknowledgement.
+		activation = "simulated"
 	}
 	return ReservationAccess{CanReschedule: s.canReschedule(r), ReservationNumber: r.Number(), ReservationDate: r.StartTime.In(Location).Format("2006-01-02"), ID: r.ID, Code: ConfirmationCode(r), SlotID: r.SlotID, SlotLabel: sl.DisplayLabel(), StartTime: r.StartTime, EndTime: r.EndTime, Duration: r.DurationMinutes, Status: r.Status, CanVerifyQR: reason == "ready", ActivationReason: reason, QRVerifiedAt: r.QRVerifiedAt, ActivationStatus: activation}, nil
 }
@@ -263,7 +264,7 @@ func (s *Service) VerifySlotQR(ctx context.Context, code, qr string, dates ...st
 			}
 		}
 		result.QRVerifiedAt = r.QRVerifiedAt
-		result.ActivationStatus = "awaiting_controller"
+		result.ActivationStatus = "simulated"
 		return nil
 	})
 	return result, err

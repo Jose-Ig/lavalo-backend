@@ -13,10 +13,11 @@ func activeFixture(t *testing.T) (*Service, *reservation.Reservation) {
 	s, r, _ := confirmedFixture(t)
 	now := r.StartTime.Add(time.Minute)
 	s.Now = func() time.Time { return now }
-	if err := s.DB.Model(r).Update("qr_verified_at", now).Error; err != nil {
-		t.Fatal(err)
+	access, err := s.VerifySlotQR(context.Background(), ConfirmationCode(*r), testSlotQR(t, s), r.StartTime.In(Location).Format("2006-01-02"))
+	if err != nil || access.ActivationStatus != "simulated" {
+		t.Fatal("QR did not start simulation", access, err)
 	}
-	r.QRVerifiedAt = &now
+	r.QRVerifiedAt = access.QRVerifiedAt
 	return s, r
 }
 func TestExtensionHoldBlocksCompetitorsAndCancellationReleasesIt(t *testing.T) {
