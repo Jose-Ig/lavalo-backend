@@ -107,7 +107,7 @@ func (s *Service) CreateExtension(ctx context.Context, code, date string, minute
 		if expiry.After(r.EndTime) {
 			expiry = r.EndTime
 		}
-		child = reservation.Reservation{ParentReservationID: &r.ID, SlotID: r.SlotID, StartTime: r.EndTime, EndTime: r.EndTime.Add(time.Duration(minutes) * time.Minute), DurationMinutes: minutes, Name: r.Name, Phone: r.Phone, Email: r.Email, AccessTokenHash: tokenHash(token), ExpiresAt: &expiry, Status: "pending"}
+		child = reservation.Reservation{ParentReservationID: &r.ID, SlotID: r.SlotID, StartTime: r.EndTime, EndTime: r.EndTime.Add(time.Duration(minutes) * time.Minute), DurationMinutes: minutes, Name: r.Name, FirstName: r.FirstName, LastName: r.LastName, PhoneAreaCode: r.PhoneAreaCode, Phone: r.Phone, Email: r.Email, AccessTokenHash: tokenHash(token), ExpiresAt: &expiry, Status: "pending"}
 		return tx.Create(&child).Error
 	})
 	return &child, token, err

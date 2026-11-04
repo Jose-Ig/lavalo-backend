@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	reservation "github.com/Jose-Ig/lavalo-backend/internal/reservations/domain/models"
 	"io"
 	"log"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var ErrUnavailable = errors.New("checkout temporarily unavailable")
@@ -22,21 +24,28 @@ var ErrConflict = errors.New("reservation cannot be paid")
 var ErrMismatch = errors.New("provider order does not match checkout")
 
 type Config struct {
-	Enabled       bool
-	LiveMode      bool
-	AccessToken   string
-	WebhookSecret string
-	CollectorID   int64
-	PublicURL     string
+	StatementDescriptor string
+	Enabled             bool
+	LiveMode            bool
+	AccessToken         string
+	WebhookSecret       string
+	CollectorID         int64
+	PublicURL           string
 }
 
 func ConfigFromEnv() Config {
 	id, _ := strconv.ParseInt(os.Getenv("MP_COLLECTOR_ID"), 10, 64)
-	return Config{Enabled: os.Getenv("MP_ENABLED") == "true", LiveMode: os.Getenv("MP_LIVE_MODE") == "true", AccessToken: os.Getenv("MP_ACCESS_TOKEN"), WebhookSecret: os.Getenv("MP_WEBHOOK_SECRET"), CollectorID: id, PublicURL: strings.TrimRight(os.Getenv("MP_PUBLIC_BASE_URL"), "/")}
+	return Config{StatementDescriptor: strings.TrimSpace(os.Getenv("MP_STATEMENT_DESCRIPTOR")), Enabled: os.Getenv("MP_ENABLED") == "true", LiveMode: os.Getenv("MP_LIVE_MODE") == "true", AccessToken: os.Getenv("MP_ACCESS_TOKEN"), WebhookSecret: os.Getenv("MP_WEBHOOK_SECRET"), CollectorID: id, PublicURL: strings.TrimRight(os.Getenv("MP_PUBLIC_BASE_URL"), "/")}
+}
+func (c Config) descriptor() string {
+	if strings.TrimSpace(c.StatementDescriptor) == "" {
+		return "UASH"
+	}
+	return strings.TrimSpace(c.StatementDescriptor)
 }
 func (c Config) Ready() bool {
 	u, e := url.Parse(c.PublicURL)
-	return c.Enabled && c.AccessToken != "" && c.WebhookSecret != "" && c.CollectorID > 0 && e == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
+	return utf8.RuneCountInString(c.descriptor()) <= 13 && c.Enabled && c.AccessToken != "" && c.WebhookSecret != "" && c.CollectorID > 0 && e == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
 }
 
 // Order follows Checkout Pro Orders, not the Payments or merchant_orders API.
@@ -140,7 +149,7 @@ func validOrderID(id string) bool {
 	}
 	return true
 }
-func orderRequest(c Checkout, cfg Config, now time.Time) (string, error) {
+func orderRequest(c Checkout, cfg Config, now time.Time, buyer reservation.Reservation) (string, error) {
 	// Persist the exact bytes once. Relative expiry MUST NOT change when replaying an idempotent request.
 	seconds := int64(c.ExpiresAt.Sub(now) / time.Second)
 	if seconds <= 0 {
@@ -153,9 +162,26 @@ func orderRequest(c Checkout, cfg Config, now time.Time) (string, error) {
 		"total_amount": amount, "external_reference": c.Reference, "expiration_time": fmt.Sprintf("PT%dS", seconds),
 		"items": []any{map[string]any{"title": "Reserva Uash", "quantity": 1, "unit_price": amount}},
 		"config": map[string]any{
-			"online":         map[string]any{"success_url": ret, "failure_url": ret, "pending_url": ret, "auto_return": "approved", "retries": map[string]bool{"allowed": true}},
-			"payment_method": map[string]any{"not_allowed_types": []string{"ticket", "atm"}},
+			"statement_descriptor": cfg.descriptor(),
+			"online":               map[string]any{"success_url": ret, "failure_url": ret, "pending_url": ret, "auto_return": "approved", "retries": map[string]bool{"allowed": true}},
+			"payment_method":       map[string]any{"not_allowed_types": []string{"ticket", "atm"}},
 		},
+	}
+
+	// Orders requires email whenever payer is present. Keep historical guest
+	// reservations payable without manufacturing missing contact or identity data.
+	if email := strings.TrimSpace(buyer.Email); email != "" {
+		payer := map[string]any{"email": email}
+		if buyer.FirstName != "" {
+			payer["first_name"] = buyer.FirstName
+		}
+		if buyer.LastName != "" {
+			payer["last_name"] = buyer.LastName
+		}
+		if buyer.PhoneAreaCode != "" && strings.HasPrefix(buyer.Phone, "+54"+buyer.PhoneAreaCode) {
+			payer["phone"] = map[string]string{"area_code": buyer.PhoneAreaCode, "number": strings.TrimPrefix(buyer.Phone, "+54"+buyer.PhoneAreaCode)}
+		}
+		body["payer"] = payer
 	}
 	b, e := json.Marshal(body)
 	return string(b), e

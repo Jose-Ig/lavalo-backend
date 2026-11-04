@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	reservation "github.com/Jose-Ig/lavalo-backend/internal/reservations/domain/models"
 	"github.com/gin-gonic/gin"
 )
 
@@ -23,7 +24,7 @@ func TestOrderRequestContract(t *testing.T) {
 	now := time.Now()
 	c := Checkout{API: "orders", IdempotencyKey: "d3306682-f4de-4c93-9444-9151643b587a", ReservationID: 1, AmountCents: 125000, Currency: "ARS", Reference: "reference", ExpiresAt: now.Add(10 * time.Minute)}
 	var err error
-	c.RequestBody, err = orderRequest(c, cfg, now)
+	c.RequestBody, err = orderRequest(c, cfg, now, reservation.Reservation{})
 	if err != nil {
 		t.Fatal(err)
 	}

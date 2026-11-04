@@ -122,7 +122,7 @@ func (s *Service) Start(ctx context.Context, id uint, token string) (View, error
 			return e
 		}
 		c = Checkout{API: "orders", SellerID: strconv.FormatInt(s.Config.CollectorID, 10), LiveMode: s.Config.LiveMode, IdempotencyKey: idempotency, ReservationID: id, Reference: hex.EncodeToString(key), AmountCents: amount, Currency: "ARS", State: "creating", ExpiresAt: *r.ExpiresAt}
-		c.RequestBody, e = orderRequest(c, s.Config, s.Now())
+		c.RequestBody, e = orderRequest(c, s.Config, s.Now(), r)
 		if e != nil {
 			return e
 		}

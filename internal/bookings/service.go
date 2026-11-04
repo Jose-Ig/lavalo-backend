@@ -22,6 +22,9 @@ var ErrConflict = errors.New("slot unavailable")
 var ErrInvalid = errors.New("invalid reservation")
 
 type Input struct {
+	FirstName     string    `json:"first_name"`
+	LastName      string    `json:"last_name"`
+	PhoneAreaCode string    `json:"phone_area_code"`
 	WhatsAppOptIn bool      `json:"whatsapp_opt_in"`
 	Email         string    `json:"email"`
 	SlotID        uint      `json:"slot_id"`
@@ -49,6 +52,14 @@ var Location = func() *time.Location {
 }()
 
 func (s *Service) Validate(i Input) error {
+	// Explicit buyer fields are optional for legacy callers, but must be complete
+	// when supplied by the current mobile form. Never infer surnames from full names.
+	if i.FirstName != "" || i.LastName != "" || i.PhoneAreaCode != "" {
+		if strings.TrimSpace(i.FirstName) == "" || strings.TrimSpace(i.LastName) == "" || len(i.FirstName) > 100 || len(i.LastName) > 100 || strings.TrimSpace(i.Email) == "" || !validBuyerPhone(i.Phone, i.PhoneAreaCode) {
+			return ErrInvalid
+		}
+	}
+
 	if email := strings.TrimSpace(i.Email); email != "" {
 		address, err := mail.ParseAddress(email)
 		if err != nil || len(email) > 254 || address.Address != email {
@@ -62,7 +73,11 @@ func (s *Service) Validate(i Input) error {
 	if i.SlotID == 0 || (i.Duration != 3 && i.Duration != 15 && i.Duration != 30 && i.Duration != 60) || !start.After(now) || !start.Before(midnight.AddDate(0, 0, 8)) || start.Second() != 0 || start.Nanosecond() != 0 || start.Minute()%5 != 0 || start.Hour() < 9 || start.Add(time.Duration(i.Duration)*time.Minute).After(time.Date(start.Year(), start.Month(), start.Day(), 21, 0, 0, 0, Location)) {
 		return ErrInvalid
 	}
-	if len(strings.TrimSpace(i.Name)) < 2 || len(i.Name) > 100 || len(i.Phone) < 8 || len(i.Phone) > 25 {
+	maxNameLength := 100
+	if i.FirstName != "" && i.LastName != "" {
+		maxNameLength = 201
+	}
+	if len(strings.TrimSpace(i.Name)) < 2 || len(i.Name) > maxNameLength || len(i.Phone) < 8 || len(i.Phone) > 25 {
 		return ErrInvalid
 	}
 	for _, c := range i.Phone {
@@ -84,6 +99,10 @@ func (s *Service) busy(db *gorm.DB, id uint, start, end time.Time) (bool, error)
 	return count > 0, err
 }
 func (s *Service) Create(ctx context.Context, i Input) (*reservation.Reservation, string, error) {
+	if i.FirstName != "" || i.LastName != "" {
+		i.Name = strings.TrimSpace(strings.TrimSpace(i.FirstName) + " " + strings.TrimSpace(i.LastName))
+	}
+
 	validation := i
 	if validation.SlotID == 0 {
 		validation.SlotID = 1
@@ -101,7 +120,7 @@ func (s *Service) Create(ctx context.Context, i Input) (*reservation.Reservation
 	if expiry.After(i.StartTime) {
 		expiry = i.StartTime
 	}
-	r := &reservation.Reservation{SlotID: i.SlotID, StartTime: i.StartTime.UTC(), EndTime: end.UTC(), DurationMinutes: i.Duration, Name: strings.TrimSpace(i.Name), Email: strings.TrimSpace(i.Email), WhatsAppOptIn: true, Phone: i.Phone, VehiclePlate: strings.ToUpper(strings.TrimSpace(i.Plate)), VehicleModel: strings.TrimSpace(i.Model), AccessTokenHash: tokenHash(token), ExpiresAt: &expiry, Status: reservation.ReservationStatusPending}
+	r := &reservation.Reservation{SlotID: i.SlotID, StartTime: i.StartTime.UTC(), EndTime: end.UTC(), DurationMinutes: i.Duration, Name: strings.TrimSpace(i.Name), FirstName: strings.TrimSpace(i.FirstName), LastName: strings.TrimSpace(i.LastName), PhoneAreaCode: i.PhoneAreaCode, Email: strings.TrimSpace(i.Email), WhatsAppOptIn: true, Phone: i.Phone, VehiclePlate: strings.ToUpper(strings.TrimSpace(i.Plate)), VehicleModel: strings.TrimSpace(i.Model), AccessTokenHash: tokenHash(token), ExpiresAt: &expiry, Status: reservation.ReservationStatusPending}
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if i.SlotID == 0 {
 			candidates, err := s.lockAssignmentSlots(tx)
@@ -180,4 +199,19 @@ func (s *Service) Available(ctx context.Context, start time.Time, duration int) 
 		}
 	}
 	return available, nil
+}
+
+// Argentina: national number has ten digits; area codes have two to four,
+// without the domestic 0 or mobile 15. The WhatsApp field retains +54.
+func validBuyerPhone(phone, area string) bool {
+	national := strings.TrimPrefix(phone, "+54")
+	if !strings.HasPrefix(phone, "+54") || len(national) != 10 || len(area) < 2 || len(area) > 4 || area[0] == '0' || !strings.HasPrefix(national, area) {
+		return false
+	}
+	for _, c := range national {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }

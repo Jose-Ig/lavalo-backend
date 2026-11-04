@@ -1,7 +1,7 @@
 # Checkout Pro con Orders API
 
 Uash usa Checkout Pro con Orders API para reservas individuales en ARS. El backend calcula
-1250/2500/5000 ARS para 15/30/60 minutos (tarifa actual). Los cálculos usan centavos enteros;
+250/1250/2500/5000 ARS para 3/15/30/60 minutos (tarifa actual). Los cálculos usan centavos enteros;
 solo los importes enviados a Mercado Pago se convierten a strings decimales exactos.
 Suscripciones, pruebas completas con la cuenta y salida a producción quedan fuera de esta etapa.
 
@@ -83,3 +83,19 @@ La implementación solo ejecuta verificaciones locales con dobles HTTP; no crea 
 - https://www.mercadopago.com/developers/es/docs/checkout-pro-orders/payment-management/status/order-status
 - https://www.mercadopago.com/developers/es/docs/checkout-pro-orders/additional-settings/define-order-validity
 - https://www.mercadopago.com/developers/es/docs/checkout-pro-orders/integration-test-introduction
+
+## Datos del comprador y resumen de tarjeta
+
+Las nuevas reservas del formulario piden nombre, apellido, email, código de área y número local. Se guardan `first_name`, `last_name` y `phone_area_code` en `reservations`; `name` conserva el nombre completo y `phone` conserva el formato +54 para WhatsApp. La migración aditiva se aplica al iniciar el backend. Publicar backend antes de mobile.
+
+Las nuevas Orders envían `payer.email`, `payer.first_name`, `payer.last_name` y `payer.phone` (área y número como strings). Por ejemplo: teléfono +543511234567 → `{"area_code":"351","number":"1234567"}`. No se deducen apellidos ni códigos de área de datos históricos. Si una reserva anterior no tiene email, se omite `payer`, porque Orders exige email cuando está presente. Las ampliaciones copian los datos del comprador del turno original.
+
+`config.statement_descriptor` usa UASH por defecto. Se puede personalizar con `MP_STATEMENT_DESCRIPTOR` en Railway (máximo 13 caracteres). Los checkouts ya creados conservan su cuerpo original: los datos nuevos se aplican a nuevos intentos/reservas, sin alterar el UUID ni el cuerpo de los reintentos.
+
+El flujo sigue siendo de invitado. No hay fecha de registro real y no se envía una fecha inventada ni `reservations.created_at` como sustituto. Este requisito del diagnóstico queda pendiente. La referencia de Orders documenta la clave literal `"payer.registration_date"` dentro de `additional_info`; no confundirla con un objeto `payer` anidado. Verificar este requisito con Mercado Pago antes de considerar completa la evaluación de integración.
+
+Validación local: solicitudes serializadas, datos persistidos, códigos de área de 2/3/4 dígitos, compatibilidad histórica, copia a ampliaciones e idempotencia. No se ejecutan cobros reales ni se acredita el cumplimiento en el panel de Mercado Pago desde estas pruebas.
+
+Fuentes oficiales (consultadas 2026-11-04):
+- https://www.mercadopago.com.ar/developers/es/reference/online-payments/checkout-pro/create-order/post
+- https://www.mercadopago.com.ar/developers/es/docs/checkout-pro-orders/additional-settings/configure-invoice-description
