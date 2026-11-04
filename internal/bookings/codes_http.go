@@ -149,7 +149,7 @@ func RegisterCodeRoutes(r *gin.RouterGroup, s *Service) {
 				case errors.Is(err, gorm.ErrRecordNotFound):
 					status, message = 404, "No encontramos la reserva."
 				case errors.Is(err, ErrInvalid):
-					status, message = 400, "Elegí 15, 30 o 60 minutos."
+					status, message = 400, "Elegí 3, 15, 30 o 60 minutos."
 				case errors.Is(err, ErrConflict):
 					status, message = 409, "No hay disponibilidad o el turno ya terminó. Consultá nuevamente la reserva."
 				}

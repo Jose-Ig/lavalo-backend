@@ -127,3 +127,7 @@ El control real del prototipo se documenta en `../firmware/README.md`. Un espaci
 El ESP32 consulta POST `/api/v1/controllers/poll` con `request_id` y `boot_id` (UUID), usando su token privado en Authorization. Recibe sólo orden, versión, hora del servidor y hora de corte; no datos personales ni código del cliente. Devuelve POST `/api/v1/controllers/ack` con `command_id` y `on`. La orden es estable mientras la reserva y su fin no cambien. Un arranque nuevo invalida las confirmaciones anteriores. La compra de tiempo sólo cambia el comando después de confirmar el pago.
 
 Las consultas y confirmaciones bloquean espacio y dispositivo en ese orden. El dispositivo corta localmente con un temporizador monotónico separado del hilo de red. La hora de corte no se renueva por repetir consultas. HTTP usa límites de cuerpo y de frecuencia, autenticación individual y TLS validado en firmware.
+
+## Turnos cortos para pruebas del controlador
+
+Se agrega duración de 3 minutos, seleccionada por defecto en nuevas reservas, y horarios de inicio cada 5 minutos (09:00, 09:05, 09:10, etc.). Se mantienen también 15, 30 y 60 minutos y el cierre de las 21:00. Los 3 minutos cuestan ARS 250 (25000 centavos), de acuerdo con la tarifa proporcional vigente. La ampliación también admite 3 minutos, sujeta a disponibilidad y pago confirmado. La retención pendiente sigue limitada por el inicio del turno. No se cambia el margen de anticipación del selector.

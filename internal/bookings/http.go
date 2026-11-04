@@ -18,7 +18,7 @@ func Register(r *gin.RouterGroup, s *Service) {
 		switch {
 		case errors.Is(err, ErrInvalid):
 			code = 400
-			message = "invalid reservation: use a future 15-minute interval, duration 15/30/60, within 09:00–21:00 and the next 8 days, with contact and vehicle details"
+			message = "invalid reservation: use a future 5-minute interval, duration 3/15/30/60, within 09:00–21:00 and the next 8 days, with contact and vehicle details"
 		case errors.Is(err, ErrConflict):
 			code = 409
 			message = "slot unavailable or reservation cannot be changed"

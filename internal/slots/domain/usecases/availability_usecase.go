@@ -14,7 +14,7 @@ const (
 	// Business hours configuration
 	startHour = 9
 	endHour   = 21
-	stepMins  = 15
+	stepMins  = 5
 	daysAhead = 7
 )
 

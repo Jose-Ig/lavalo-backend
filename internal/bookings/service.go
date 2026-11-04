@@ -59,7 +59,7 @@ func (s *Service) Validate(i Input) error {
 	start := i.StartTime.In(Location)
 	now := s.Now().In(Location)
 	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, Location)
-	if i.SlotID == 0 || (i.Duration != 15 && i.Duration != 30 && i.Duration != 60) || !start.After(now) || !start.Before(midnight.AddDate(0, 0, 8)) || start.Second() != 0 || start.Nanosecond() != 0 || start.Minute()%15 != 0 || start.Hour() < 9 || start.Add(time.Duration(i.Duration)*time.Minute).After(time.Date(start.Year(), start.Month(), start.Day(), 21, 0, 0, 0, Location)) {
+	if i.SlotID == 0 || (i.Duration != 3 && i.Duration != 15 && i.Duration != 30 && i.Duration != 60) || !start.After(now) || !start.Before(midnight.AddDate(0, 0, 8)) || start.Second() != 0 || start.Nanosecond() != 0 || start.Minute()%5 != 0 || start.Hour() < 9 || start.Add(time.Duration(i.Duration)*time.Minute).After(time.Date(start.Year(), start.Month(), start.Day(), 21, 0, 0, 0, Location)) {
 		return ErrInvalid
 	}
 	if len(strings.TrimSpace(i.Name)) < 2 || len(i.Name) > 100 || len(i.Phone) < 8 || len(i.Phone) > 25 {

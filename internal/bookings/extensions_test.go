@@ -26,7 +26,7 @@ func TestExtensionHoldBlocksCompetitorsAndCancellationReleasesIt(t *testing.T) {
 	code := ConfirmationCode(*r)
 	day := r.StartTime.In(Location).Format("2006-01-02")
 	options, err := s.ExtensionOptions(ctx, code, day)
-	if err != nil || len(options) != 3 || options[0].AmountCents != 125000 {
+	if err != nil || len(options) != 4 || options[0].AmountCents != 25000 {
 		t.Fatal(options, err)
 	}
 	child, token, err := s.CreateExtension(ctx, code, day, 30)
@@ -52,7 +52,7 @@ func TestExtensionHoldBlocksCompetitorsAndCancellationReleasesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	options, err = s.ExtensionOptions(ctx, code, day)
-	if err != nil || len(options) != 3 {
+	if err != nil || len(options) != 4 {
 		t.Fatal("cancel did not free hold", options, err)
 	}
 }
@@ -66,7 +66,7 @@ func TestExtensionHonorsNextBookingClosingAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	options, err := s.ExtensionOptions(ctx, code, day)
-	if err != nil || len(options) != 2 {
+	if err != nil || len(options) != 3 {
 		t.Fatal("next booking ignored", options, err)
 	}
 	if _, _, err = s.CreateExtension(ctx, code, day, 60); !errors.Is(err, ErrConflict) {
@@ -82,13 +82,13 @@ func TestExtensionHonorsNextBookingClosingAndExpiry(t *testing.T) {
 	now := child.ExpiresAt.Add(time.Second)
 	s.Now = func() time.Time { return now }
 	options, err = s.ExtensionOptions(ctx, code, day)
-	if err != nil || len(options) != 3 {
+	if err != nil || len(options) != 4 {
 		t.Fatal("expired hold blocks", options, err)
 	}
 	closing := time.Date(r.StartTime.In(Location).Year(), r.StartTime.In(Location).Month(), r.StartTime.In(Location).Day(), 20, 45, 0, 0, Location)
 	s.DB.Model(r).Update("end_time", closing)
 	options, err = s.ExtensionOptions(ctx, code, day)
-	if err != nil || len(options) != 1 || options[0].Minutes != 15 {
+	if err != nil || len(options) != 2 || options[0].Minutes != 3 || options[1].Minutes != 15 {
 		t.Fatal("closing ignored", options, err)
 	}
 }

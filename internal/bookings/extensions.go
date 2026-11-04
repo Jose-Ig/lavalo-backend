@@ -19,7 +19,7 @@ func (s *Service) extensionAllowed(r reservation.Reservation) bool {
 	return r.ParentReservationID == nil && r.Status == "confirmed" && r.QRVerifiedAt != nil && !s.Now().Before(r.StartTime) && s.Now().Before(r.EndTime)
 }
 func (s *Service) extensionFree(tx *gorm.DB, r reservation.Reservation, minutes int) (bool, error) {
-	if minutes != 15 && minutes != 30 && minutes != 60 {
+	if minutes != 3 && minutes != 15 && minutes != 30 && minutes != 60 {
 		return false, ErrInvalid
 	}
 	end := r.EndTime.Add(time.Duration(minutes) * time.Minute)
@@ -51,7 +51,7 @@ func (s *Service) ExtensionOptions(ctx context.Context, code, date string) ([]Ex
 		return nil, ErrConflict
 	}
 	result := []ExtensionOption{}
-	for _, minutes := range []int{15, 30, 60} {
+	for _, minutes := range []int{3, 15, 30, 60} {
 		free, err := s.extensionFree(tx, r, minutes)
 		if err != nil {
 			return nil, err

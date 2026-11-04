@@ -78,8 +78,8 @@ func TestGetWeekAvailability_AllAvailable(t *testing.T) {
 		}
 	}
 
-	// Should have 28 hours (8:00-22:00, 30min intervals = 14 hours * 2)
-	expectedHours := 48
+	// 09:00-21:00 in 5-minute intervals: 12 hours * 12.
+	expectedHours := 144
 	if len(dayAvail.Hours) != expectedHours {
 		t.Errorf("expected %d hours, got %d", expectedHours, len(dayAvail.Hours))
 	}
@@ -180,10 +180,10 @@ func TestGetWeekAvailability_HourBlockedWhenAllSlotsReserved(t *testing.T) {
 		t.Error("08:00 should NOT be available (both slots reserved)")
 	}
 
-	// Second hour (08:30) should be available
-	secondHour := dayAvail.Hours[2]
+	// 09:30 should be available
+	secondHour := dayAvail.Hours[6]
 	if !secondHour.IsAvailable {
-		t.Error("08:30 should be available")
+		t.Error("09:30 should be available")
 	}
 }
 
