@@ -5,6 +5,8 @@
 #include <ArduinoJson.h>
 #include <esp_timer.h>
 #include <time.h>
+#include <sys/time.h>
+#include "deadline.h"
 #include "trusted_ca.h"
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -15,7 +17,7 @@
 // LED prototype only: active HIGH on P25/P26. No mains equipment connected.
 constexpr int HYDRO_PIN = 25;
 constexpr int VACUUM_PIN = 26;
-constexpr int64_t MAX_SESSION_MS = 12LL * 60 * 60 * 1000;
+constexpr int64_t MAX_SESSION_MS = uash::kMaxSessionMs;
 portMUX_TYPE stateMux = portMUX_INITIALIZER_UNLOCKED;
 int64_t deadlineUs = 0;
 uint64_t currentRevision = 0, appliedRevision = 0, closedRevision = 0;
@@ -30,7 +32,8 @@ void outputTask(void*) {
     int64_t now = esp_timer_get_time();
     portENTER_CRITICAL(&stateMux);
     bool on = deadlineUs > now;
-    if (!on && deadlineUs != 0) {
+    bool expired = !on && deadlineUs != 0;
+    if (expired) {
       closedRevision = currentRevision;
       deadlineUs = 0;
     }
@@ -39,6 +42,7 @@ void outputTask(void*) {
     outputOn = on;
     appliedRevision = currentRevision;
     portEXIT_CRITICAL(&stateMux);
+    if (expired) Serial.println("Tiempo autorizado terminado. Salidas apagadas.");
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
@@ -96,7 +100,6 @@ void pollBackend() {
   request["boot_id"] = bootID;
   String body, response;
   serializeJson(request, body);
-  int64_t startedUs = esp_timer_get_time();
   int status = postJSON("/controllers/poll", body, response);
   if (status == 401 || status == 403) {
     stopOutputs(); Serial.println("Acceso del dispositivo rechazado. Salidas apagadas."); return;
@@ -111,21 +114,33 @@ void pollBackend() {
   bool on = data["on"].as<bool>();
   uint64_t revision = data["revision"].as<uint64_t>();
   String id = data["command_id"].as<String>();
+  const bool same = id == commandID;
   int64_t remaining = data["end_ms"].as<int64_t>() - data["server_ms"].as<int64_t>();
   if (id.length() != 36 || revision == 0 || (on && (remaining <= 0 || remaining > MAX_SESSION_MS))) return;
-  int64_t candidate = startedUs + remaining * 1000; // Conservative: includes transit/processing time.
+  // Both app and controller use the reservation's absolute UTC end. Use NTP
+  // only to establish a NEW deadline; the independent monotonic timer owns cutoff.
+  const int64_t sampledUs = esp_timer_get_time();
+  struct timeval wall;
+  gettimeofday(&wall, nullptr);
+  const int64_t epochUs = (int64_t)wall.tv_sec * 1000000LL + wall.tv_usec;
+  const int64_t candidate = uash::deadlineForEnd(data["end_ms"].as<int64_t>(), epochUs, sampledUs);
+  if (on && !same && candidate == 0) {
+    stopOutputs(); Serial.println("Hora de corte vencida o reloj fuera de rango."); return;
+  }
   portENTER_CRITICAL(&stateMux);
   bool stale = revision < currentRevision || (on && revision <= closedRevision);
   portEXIT_CRITICAL(&stateMux);
   if (stale || (revision == currentRevision && commandID.length() && id != commandID)) return;
-  bool same = id == commandID;
   commandID = id;
   portENTER_CRITICAL(&stateMux);
   currentRevision = revision;
   if (!on) deadlineUs = 0;
-  else if (!same || deadlineUs == 0) deadlineUs = candidate;
-  else if (candidate < deadlineUs) deadlineUs = candidate; // Repeated polling never restarts the timer.
+  else deadlineUs = uash::authorizedDeadline(deadlineUs, candidate, !same);
   portEXIT_CRITICAL(&stateMux);
+  if (on && !same) {
+    Serial.printf("Nueva autorizacion. Tiempo restante al recibirla: %lld ms\n",
+      (long long)((candidate - sampledUs) / 1000));
+  }
   delay(30); // Allow output task to apply, without blocking its cutoff.
   portENTER_CRITICAL(&stateMux);
   bool applied = outputOn == on && appliedRevision == revision;

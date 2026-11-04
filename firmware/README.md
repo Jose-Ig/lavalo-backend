@@ -102,3 +102,16 @@ Este MVP prueba lógica de control con LED. La etapa de potencia del producto fi
 - https://github.com/espressif/arduino-esp32/tree/master/libraries/NetworkClientSecure
 - https://github.com/espressif/arduino-esp32/tree/master/libraries/HTTPClient
 - https://arduinojson.org/v7/api/json/deserializejson/
+
+## Corrección del adelanto de corte
+
+El firmware usa la fecha UTC `end_ms` y una muestra NTP de `gettimeofday()` tomada al recibir una autorización nueva. Convierte ese fin a un plazo monotónico fijo. No descuenta el establecimiento de HTTPS y no conserva el mínimo de las consultas sucesivas. Las repeticiones no adelantan ni reinician el plazo; una autorización nueva por compra pagada sí puede modificarlo. El temporizador independiente sigue cortando sin red.
+
+Prueba reproducible del cálculo, sin placa:
+
+```sh
+c++ -std=c++11 firmware/tests/deadline_test.cpp -o /tmp/uash-deadline-test
+/tmp/uash-deadline-test
+```
+
+La exactitud respecto de la app depende también de los relojes del teléfono y del ESP32; mantener fecha y hora automáticas en el teléfono. No se agrega una tolerancia fija de segundos al fin de la reserva.
