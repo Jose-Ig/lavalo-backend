@@ -112,7 +112,7 @@ func RegisterCodeRoutes(r *gin.RouterGroup, s *Service) {
 				case errors.Is(err, gorm.ErrRecordNotFound):
 					status, message = 404, "No encontramos la reserva con ese código y fecha."
 				case errors.Is(err, ErrInvalid):
-					status, message = 400, "Elegí un turno futuro, dentro de los próximos 8 días y entre 09:00 y 21:00."
+					status, message = 400, "Elegí un turno futuro, dentro de los próximos 8 días y entre 09:00 y 23:59."
 				case errors.Is(err, ErrConflict):
 					status, message = 409, "El turno ya no está disponible o la reserva ya comenzó o fue validada. Actualizá la reserva y elegí otro turno."
 				}

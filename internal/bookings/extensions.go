@@ -24,7 +24,7 @@ func (s *Service) extensionFree(tx *gorm.DB, r reservation.Reservation, minutes 
 	}
 	end := r.EndTime.Add(time.Duration(minutes) * time.Minute)
 	local := r.StartTime.In(Location)
-	if end.After(time.Date(local.Year(), local.Month(), local.Day(), 21, 0, 0, 0, Location)) {
+	if end.After(time.Date(local.Year(), local.Month(), local.Day(), 23, 59, 0, 0, Location)) {
 		return false, nil
 	}
 	var sl slot.Slot

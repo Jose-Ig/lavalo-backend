@@ -78,8 +78,8 @@ func TestGetWeekAvailability_AllAvailable(t *testing.T) {
 		}
 	}
 
-	// 09:00-21:00 in 5-minute intervals: 12 hours * 12.
-	expectedHours := 144
+	// 09:00-23:55 in 5-minute intervals: 15 hours * 12.
+	expectedHours := 180
 	if len(dayAvail.Hours) != expectedHours {
 		t.Errorf("expected %d hours, got %d", expectedHours, len(dayAvail.Hours))
 	}

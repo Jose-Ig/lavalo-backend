@@ -13,7 +13,7 @@ import (
 const (
 	// Business hours configuration
 	startHour = 9
-	endHour   = 21
+	endHour   = 24
 	stepMins  = 5
 	daysAhead = 7
 )

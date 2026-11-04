@@ -106,7 +106,7 @@ Después de validar el QR, mientras el turno esté confirmado y vigente, se pued
 - `POST /api/v1/reservations/extensions/availability`: `{ "code": "123456", "date": "2026-10-31" }`; devuelve opciones `{ minutes, amount_cents }` con tarifa del servidor.
 - `POST /api/v1/reservations/extensions`: mismo body más `minutes`; devuelve `{ data, access_token }` para pagar mediante el checkout Orders existente.
 
-La compra crea una reserva hija pendiente (`parent_reservation_id`, columna nullable agregada por AutoMigrate). Retiene únicamente el intervalo adicional durante un máximo de 10 minutos, limitado por el final del turno original. Incluye reservas confirmadas y retenciones vigentes al comprobar solapamientos; respeta el cierre de las 21:00. Cancelar o vencer la ampliación no cancela la reserva original.
+La compra crea una reserva hija pendiente (`parent_reservation_id`, columna nullable agregada por AutoMigrate). Retiene únicamente el intervalo adicional durante un máximo de 10 minutos, limitado por el final del turno original. Incluye reservas confirmadas y retenciones vigentes al comprobar solapamientos; respeta el cierre de las 23:59. Cancelar o vencer la ampliación no cancela la reserva original.
 
 La confirmación de pago bloquea el espacio, la reserva original y la ampliación; comprueba de nuevo pago, vigencia, espacio habilitado y continuidad. Solo entonces amplía `end_time` y la duración de la original; conserva su código y QR. La hija pasa a `completed` para no duplicar ocupación. Los reintentos no suman minutos otra vez. Pagos tardíos/conflictos y devoluciones posteriores se dejan en revisión; no se recorta silenciosamente un servicio en curso.
 
@@ -130,4 +130,6 @@ Las consultas y confirmaciones bloquean espacio y dispositivo en ese orden. El d
 
 ## Turnos cortos para pruebas del controlador
 
-Se agrega duración de 3 minutos, seleccionada por defecto en nuevas reservas, y horarios de inicio cada 5 minutos (09:00, 09:05, 09:10, etc.). Se mantienen también 15, 30 y 60 minutos y el cierre de las 21:00. Los 3 minutos cuestan ARS 250 (25000 centavos), de acuerdo con la tarifa proporcional vigente. La ampliación también admite 3 minutos, sujeta a disponibilidad y pago confirmado. La retención pendiente sigue limitada por el inicio del turno. No se cambia el margen de anticipación del selector.
+Se agrega duración de 3 minutos, seleccionada por defecto en nuevas reservas, y horarios de inicio cada 5 minutos (09:00, 09:05, 09:10, etc.). Se mantienen también 15, 30 y 60 minutos y el cierre de las 23:59. Los 3 minutos cuestan ARS 250 (25000 centavos), de acuerdo con la tarifa proporcional vigente. La ampliación también admite 3 minutos, sujeta a disponibilidad y pago confirmado. La retención pendiente sigue limitada por el inicio del turno. No se cambia el margen de anticipación del selector.
+
+El horario operativo se extiende de 09:00 a 23:59. Los inicios siguen cada 5 minutos (último: 23:55); la reserva completa y sus ampliaciones deben terminar como máximo a las 23:59 del mismo día.

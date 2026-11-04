@@ -87,7 +87,7 @@ func TestInvalidBookings(t *testing.T) {
 	cases := []Input{base, base, base, base, base}
 	cases[0].Duration = 45
 	cases[1].StartTime = s.Now().Add(-time.Hour)
-	cases[2].StartTime = time.Date(2026, 10, 28, 20, 30, 0, 0, Location)
+	cases[2].StartTime = time.Date(2026, 10, 28, 23, 30, 0, 0, Location)
 	cases[3].Name = ""
 	cases[4].StartTime = base.StartTime.Add(time.Minute)
 	for _, i := range cases {
