@@ -3,3 +3,8 @@
 data/
 *.db-shm
 *.db-wal
+
+# Controller credentials (never commit generated tokens or Wi-Fi passwords)
+firmware/**/secrets.h
+firmware/**/controller.json
+controller-credentials*.json

@@ -119,3 +119,11 @@ Las etiquetas numéricas de espacios se muestran como `Espacio N° n`, incluso c
 El escaneo sigue validando código, fecha, pago confirmado, espacio habilitado y horario `[inicio, fin)`. Solo después registra el check-in y devuelve `simulated`, también en consultas posteriores. La cuenta regresiva usa `end_time` del servidor; volver a escanear no reinicia el tiempo. Se oculta Editar reserva y se habilita Agregar más tiempo durante el turno vigente.
 
 La disponibilidad y los pagos adicionales siguen usando el flujo real de reservas y Mercado Pago. Solo la respuesta del Arduino se simula: no se aprueban pagos automáticamente, no se agregan minutos gratis y no se modifica el horario original al escanear. Al confirmarse un pago adicional se actualiza el fin de la reserva y la app refresca la cuenta regresiva.
+
+## MVP: controlador HTTPS por espacio
+
+El control real del prototipo se documenta en `../firmware/README.md`. Un espacio registrado en `devices` deja de considerar el QR como confirmación del equipo: devuelve `awaiting_controller`, `controller_offline` o `controller_unavailable` hasta que exista una confirmación reciente del comando correcto; entonces devuelve `active`. Los espacios no registrados conservan la simulación. No se cambia ninguna credencial de pago.
+
+El ESP32 consulta POST `/api/v1/controllers/poll` con `request_id` y `boot_id` (UUID), usando su token privado en Authorization. Recibe sólo orden, versión, hora del servidor y hora de corte; no datos personales ni código del cliente. Devuelve POST `/api/v1/controllers/ack` con `command_id` y `on`. La orden es estable mientras la reserva y su fin no cambien. Un arranque nuevo invalida las confirmaciones anteriores. La compra de tiempo sólo cambia el comando después de confirmar el pago.
+
+Las consultas y confirmaciones bloquean espacio y dispositivo en ese orden. El dispositivo corta localmente con un temporizador monotónico separado del hilo de red. La hora de corte no se renueva por repetir consultas. HTTP usa límites de cuerpo y de frecuencia, autenticación individual y TLS validado en firmware.

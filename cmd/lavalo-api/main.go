@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/Jose-Ig/lavalo-backend/internal/bookings"
+	"github.com/Jose-Ig/lavalo-backend/internal/controllers"
 	"github.com/Jose-Ig/lavalo-backend/internal/payments"
 	"log"
 	"net/http"
@@ -40,6 +42,8 @@ func main() {
 	// Parse command line flags
 	seedSlots := flag.Int("seed-slots", 0, "Create numbered development slots (debug mode only)")
 	migrateOnly := flag.Bool("migrate-only", false, "Run migrations and exit")
+	controllerSlot := flag.String("controller-slot", "", "Provision/rotate controller for this slot public UUID")
+	controllerFile := flag.String("controller-file", "", "New private JSON file for generated device credentials")
 	flag.Parse()
 
 	// Initialize logger
@@ -68,6 +72,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *controllerSlot != "" {
+		if *controllerFile == "" {
+			log.Fatal("controller-file is required")
+		}
+		f, e := os.OpenFile(*controllerFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if e != nil {
+			log.Fatal("Cannot create private controller file; choose a new path")
+		}
+		d, token, e := controllers.New(db).Provision(context.Background(), *controllerSlot)
+		if e != nil {
+			f.Close()
+			os.Remove(*controllerFile)
+			log.Fatal("Cannot provision controller; check the slot public UUID and database")
+		}
+		e = json.NewEncoder(f).Encode(map[string]any{"device_id": d.ID, "slot_public_id": *controllerSlot, "token": token})
+		closeErr := f.Close()
+		if e != nil || closeErr != nil {
+			log.Fatal("Credential file could not be written; provision again to a new file")
+		}
+		log.Print("Controller provisioned; credentials saved only to the private file")
+		return
+	}
 	if *seedSlots > 0 {
 		if cfg.Server.Mode != gin.DebugMode {
 			log.Fatal("seed-slots requires debug mode")
@@ -173,6 +199,7 @@ func runMigrations(db *gorm.DB) error {
 		&addressModels.Address{},
 		&paymentModels.Payment{},
 		&bookings.NotificationIntent{},
+		&controllers.Device{},
 		&payments.Checkout{},
 		&payments.Receipt{},
 	)
@@ -200,6 +227,7 @@ func setupRoutes(router *gin.Engine, db *gorm.DB) {
 
 		// Register domain handlers
 		bookings.Register(v1, bookings.New(db))
+		controllers.Register(v1, controllers.New(db))
 		payments.Register(v1, payments.New(db, payments.ConfigFromEnv()))
 
 		// Payments are scoped to authorized reservations. The old collection endpoint is intentionally unsupported.

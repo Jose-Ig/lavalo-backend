@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"github.com/Jose-Ig/lavalo-backend/internal/controllers"
 	"net/url"
 	"strings"
 	"time"
@@ -183,10 +184,9 @@ func (s *Service) access(db *gorm.DB, r reservation.Reservation) (ReservationAcc
 	case !sl.IsAvailable:
 		reason = "slot_unavailable"
 	}
-	activation := "not_started"
-	if r.QRVerifiedAt != nil {
-		// Test flow: a valid check-in simulates controller acknowledgement.
-		activation = "simulated"
+	activation, err := controllers.Activation(db, r, s.Now())
+	if err != nil {
+		return ReservationAccess{}, err
 	}
 	return ReservationAccess{CanReschedule: s.canReschedule(r), ReservationNumber: r.Number(), ReservationDate: r.StartTime.In(Location).Format("2006-01-02"), ID: r.ID, Code: ConfirmationCode(r), SlotID: r.SlotID, SlotLabel: sl.DisplayLabel(), StartTime: r.StartTime, EndTime: r.EndTime, Duration: r.DurationMinutes, Status: r.Status, CanVerifyQR: reason == "ready", ActivationReason: reason, QRVerifiedAt: r.QRVerifiedAt, ActivationStatus: activation}, nil
 }
@@ -264,7 +264,10 @@ func (s *Service) VerifySlotQR(ctx context.Context, code, qr string, dates ...st
 			}
 		}
 		result.QRVerifiedAt = r.QRVerifiedAt
-		result.ActivationStatus = "simulated"
+		result.ActivationStatus, err = controllers.Activation(tx, r, s.Now())
+		if err != nil {
+			return err
+		}
 		return nil
 	})
 	return result, err
