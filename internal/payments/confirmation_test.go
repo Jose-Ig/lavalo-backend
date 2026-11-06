@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Jose-Ig/lavalo-backend/internal/controllers"
+	"github.com/Jose-Ig/lavalo-backend/internal/operations"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -71,7 +72,7 @@ func fixture(t *testing.T) (*Service, *fakeGateway, uint, string) {
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { sqlDB.Close() })
-	if e = db.AutoMigrate(&controllers.Device{}, &reservation.Reservation{}, &slot.Slot{}, &Checkout{}, &Receipt{}, &bookings.NotificationIntent{}); e != nil {
+	if e = db.AutoMigrate(&operations.Session{}, &operations.Execution{}, &operations.Incident{}, &operations.Boot{}, &controllers.Device{}, &reservation.Reservation{}, &slot.Slot{}, &Checkout{}, &Receipt{}, &bookings.NotificationIntent{}); e != nil {
 		t.Fatal(e)
 	}
 	db.Create(&slot.Slot{ID: 1, Label: "One", IsAvailable: true})

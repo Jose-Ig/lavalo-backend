@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Jose-Ig/lavalo-backend/internal/controllers"
+	"github.com/Jose-Ig/lavalo-backend/internal/operations"
 	reservation "github.com/Jose-Ig/lavalo-backend/internal/reservations/domain/models"
 	slot "github.com/Jose-Ig/lavalo-backend/internal/slots/domain/models"
 	"github.com/glebarez/sqlite"
@@ -22,7 +23,7 @@ func fixture(t *testing.T) (*Service, Input) {
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { sqlDB.Close() })
-	if err = db.AutoMigrate(&controllers.Device{}, &reservation.Reservation{}, &slot.Slot{}); err != nil {
+	if err = db.AutoMigrate(&operations.Session{}, &operations.Execution{}, &operations.Incident{}, &operations.Boot{}, &controllers.Device{}, &reservation.Reservation{}, &slot.Slot{}); err != nil {
 		t.Fatal(err)
 	}
 	if err = db.Create(&slot.Slot{ID: 1, Label: "One", IsAvailable: true}).Error; err != nil {

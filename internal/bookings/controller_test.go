@@ -21,6 +21,9 @@ func TestQRRequiresControllerAckBeforeActive(t *testing.T) {
 		t.Fatal(err)
 	}
 	boot := uuid.NewString()
+	if _, err = cs.Bootstrap(ctx, token, controllers.BootstrapInput{RequestID: uuid.NewString(), BootID: boot, Protocol: 2, Ready: true}); err != nil {
+		t.Fatal(err)
+	}
 	off, err := cs.Poll(ctx, token, uuid.NewString(), boot)
 	if err != nil || off.On {
 		t.Fatal(off, err)
@@ -39,7 +42,7 @@ func TestQRRequiresControllerAckBeforeActive(t *testing.T) {
 	if err != nil || !command.On {
 		t.Fatal(command, err)
 	}
-	if err = cs.Ack(ctx, token, command.CommandID, true); err != nil {
+	if err = cs.AckForBoot(ctx, token, boot, command.CommandID, true, &controllers.Checkpoint{SessionID: command.SessionID, ExecutionID: command.ExecutionID, Revision: command.Revision, Sequence: 1, RemainingMS: command.EndMS - s.Now().UnixMilli()}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.LookupCode(ctx, ConfirmationCode(*r), r.StartTime.In(Location).Format("2006-01-02"))

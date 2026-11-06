@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/Jose-Ig/lavalo-backend/internal/bookings"
 	"github.com/Jose-Ig/lavalo-backend/internal/controllers"
+	"github.com/Jose-Ig/lavalo-backend/internal/operations"
 	"github.com/Jose-Ig/lavalo-backend/internal/payments"
 	"log"
 	"net/http"
@@ -124,6 +125,7 @@ func main() {
 	paymentCtx, cancelPayments := context.WithCancel(context.Background())
 	defer cancelPayments()
 	go payments.New(db, payments.ConfigFromEnv()).RunReconciler(paymentCtx)
+	go controllers.New(db).RunMonitor(paymentCtx)
 
 	// Start server
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
@@ -199,7 +201,7 @@ func runMigrations(db *gorm.DB) error {
 		&addressModels.Address{},
 		&paymentModels.Payment{},
 		&bookings.NotificationIntent{},
-		&controllers.Device{},
+		&operations.Session{}, &operations.Execution{}, &operations.Incident{}, &operations.Boot{}, &controllers.Device{},
 		&payments.Checkout{},
 		&payments.Receipt{},
 	)

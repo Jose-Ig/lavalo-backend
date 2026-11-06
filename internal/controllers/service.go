@@ -7,7 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	reservation "github.com/Jose-Ig/lavalo-backend/internal/reservations/domain/models"
+	"github.com/Jose-Ig/lavalo-backend/internal/operations"
 	slot "github.com/Jose-Ig/lavalo-backend/internal/slots/domain/models"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -18,9 +18,13 @@ import (
 var ErrUnauthorized = errors.New("unauthorized controller")
 var ErrStale = errors.New("stale controller command")
 
-const OnlineWindow = 12 * time.Second
+const OnlineWindow = operations.OnlineWindow
+
+var ErrBootstrap = errors.New("controller bootstrap required")
 
 type Device struct {
+	SessionID     string     `json:"-"`
+	Protocol      int        `json:"-"`
 	BootID        string     `json:"-"`
 	ID            string     `gorm:"primaryKey;size:36" json:"id"`
 	SlotID        uint       `gorm:"uniqueIndex;not null" json:"slot_id"`
@@ -73,6 +77,8 @@ func (s *Service) Provision(ctx context.Context, publicID string) (Device, strin
 			d.SlotID = sl.ID
 		}
 		d.BootID = ""
+		d.Protocol = 0
+		// Rotating credentials must not discard a recoverable session.
 		d.TokenHash = hash(token)
 		d.Enabled = true
 		d.CommandID = uuid.NewString()
@@ -89,44 +95,20 @@ func (s *Service) Provision(ctx context.Context, publicID string) (Device, strin
 }
 
 type Command struct {
-	RequestID string `json:"request_id"`
-	CommandID string `json:"command_id"`
-	Revision  uint64 `json:"revision"`
-	On        bool   `json:"on"`
-	ServerMS  int64  `json:"server_ms"`
-	EndMS     int64  `json:"end_ms"`
-	PollMS    int    `json:"poll_ms"`
-}
-
-func desired(tx *gorm.DB, sl slot.Slot, enabled bool, now time.Time) (uint, int64, error) {
-	if !enabled || !sl.IsAvailable {
-		return 0, 0, nil
-	}
-	var rs []reservation.Reservation
-	err := tx.Where("slot_id = ? AND parent_reservation_id IS NULL AND status = ? AND qr_verified_at IS NOT NULL AND start_time <= ? AND end_time > ?", sl.ID, "confirmed", now, now).Limit(2).Find(&rs).Error
-	if err != nil {
-		return 0, 0, err
-	}
-	if len(rs) != 1 {
-		return 0, 0, nil
-	} // Conflicting data fails closed.
-	return rs[0].ID, rs[0].EndTime.UnixMilli(), nil
-}
-func syncCommand(tx *gorm.DB, d *Device, sl slot.Slot, now time.Time) error {
-	id, end, err := desired(tx, sl, d.Enabled, now)
-	if err != nil {
-		return err
-	}
-	if d.CommandID == "" || d.ReservationID != id || d.EndMS != end {
-		d.CommandID = uuid.NewString()
-		d.Revision++
-		d.ReservationID = id
-		d.EndMS = end
-		d.AckOn = false
-		d.AckCommandID = ""
-		d.AckAt = nil
-	}
-	return nil
+	RequestID   string `json:"request_id"`
+	BootID      string `json:"boot_id"`
+	Protocol    int    `json:"protocol"`
+	CommandID   string `json:"command_id"`
+	Revision    uint64 `json:"revision"`
+	On          bool   `json:"on"`
+	ServerMS    int64  `json:"server_ms"`
+	EndMS       int64  `json:"end_ms"`
+	RemainingMS int64  `json:"remaining_ms"`
+	SessionID   string `json:"session_id,omitempty"`
+	ExecutionID string `json:"execution_id,omitempty"`
+	State       string `json:"state"`
+	Reason      string `json:"reason,omitempty"`
+	PollMS      int    `json:"poll_ms"`
 }
 
 // Slot first, device second: same slot lock used by booking/payment writers.
@@ -162,68 +144,4 @@ func (s *Service) withDevice(ctx context.Context, token string, fn func(*gorm.DB
 		}
 		return fn(tx, &d, sl)
 	})
-}
-func (s *Service) Poll(ctx context.Context, token, requestID, bootID string) (Command, error) {
-	var c Command
-	err := s.withDevice(ctx, token, func(tx *gorm.DB, d *Device, sl slot.Slot) error {
-		now := s.Now()
-		if d.BootID != bootID {
-			d.BootID = bootID
-			d.CommandID = ""
-		}
-		if err := syncCommand(tx, d, sl, now); err != nil {
-			return err
-		}
-		d.LastSeenAt = &now
-		if err := tx.Save(d).Error; err != nil {
-			return err
-		}
-		c = Command{requestID, d.CommandID, d.Revision, d.ReservationID != 0, now.UnixMilli(), d.EndMS, 2500}
-		return nil
-	})
-	return c, err
-}
-func (s *Service) Ack(ctx context.Context, token, commandID string, on bool) error {
-	return s.withDevice(ctx, token, func(tx *gorm.DB, d *Device, sl slot.Slot) error {
-		now := s.Now()
-		if err := syncCommand(tx, d, sl, now); err != nil {
-			return err
-		}
-		if d.CommandID != commandID || on != (d.ReservationID != 0) {
-			return ErrStale
-		}
-		d.AckCommandID = commandID
-		d.AckOn = on
-		d.AckAt = &now
-		d.LastSeenAt = &now
-		return tx.Save(d).Error
-	})
-}
-
-// Activation reports a GPIO acknowledgement, not proof of mains voltage or motor operation.
-func Activation(db *gorm.DB, r reservation.Reservation, now time.Time) (string, error) {
-	if r.QRVerifiedAt == nil {
-		return "not_started", nil
-	}
-	var d Device
-	err := db.Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)}).Where("slot_id = ?", r.SlotID).First(&d).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return "simulated", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	if r.Status != "confirmed" || !now.Before(r.EndTime) {
-		return "ended", nil
-	}
-	if !d.Enabled {
-		return "controller_unavailable", nil
-	}
-	if d.LastSeenAt == nil || now.Sub(*d.LastSeenAt) > OnlineWindow {
-		return "controller_offline", nil
-	}
-	if d.ReservationID == r.ID && d.EndMS == r.EndTime.UnixMilli() && d.AckOn && d.AckAt != nil && now.Sub(*d.AckAt) <= OnlineWindow && d.AckCommandID == d.CommandID {
-		return "active", nil
-	}
-	return "awaiting_controller", nil
 }

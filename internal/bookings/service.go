@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/Jose-Ig/lavalo-backend/internal/operations"
 	"net/mail"
 	"strings"
 	"time"
@@ -96,7 +97,10 @@ func (s *Service) busy(db *gorm.DB, id uint, start, end time.Time) (bool, error)
 	start, end = start.UTC(), end.UTC()
 	var count int64
 	err := db.Model(&reservation.Reservation{}).Where("slot_id = ? AND start_time < ? AND end_time > ?", id, end, start).Where("status = ? OR (status = ? AND (expires_at IS NULL OR expires_at > ?))", "confirmed", "pending", s.Now()).Count(&count).Error
-	return count > 0, err
+	if err != nil || count > 0 {
+		return count > 0, err
+	}
+	return operations.Occupied(db, id, 0, start, end, s.Now())
 }
 func (s *Service) Create(ctx context.Context, i Input) (*reservation.Reservation, string, error) {
 	if i.FirstName != "" || i.LastName != "" {

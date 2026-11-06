@@ -104,6 +104,7 @@ func EnsureConfirmation(tx *gorm.DB, r *reservation.Reservation) error {
 }
 
 type ReservationAccess struct {
+	controllers.View
 	CanReschedule     bool                          `json:"can_reschedule"`
 	ReservationNumber string                        `json:"reservation_number"`
 	ReservationDate   string                        `json:"reservation_date"`
@@ -184,11 +185,11 @@ func (s *Service) access(db *gorm.DB, r reservation.Reservation) (ReservationAcc
 	case !sl.IsAvailable:
 		reason = "slot_unavailable"
 	}
-	activation, err := controllers.Activation(db, r, s.Now())
+	view, err := controllers.Snapshot(db, r, s.Now())
 	if err != nil {
 		return ReservationAccess{}, err
 	}
-	return ReservationAccess{CanReschedule: s.canReschedule(r), ReservationNumber: r.Number(), ReservationDate: r.StartTime.In(Location).Format("2006-01-02"), ID: r.ID, Code: ConfirmationCode(r), SlotID: r.SlotID, SlotLabel: sl.DisplayLabel(), StartTime: r.StartTime, EndTime: r.EndTime, Duration: r.DurationMinutes, Status: r.Status, CanVerifyQR: reason == "ready", ActivationReason: reason, QRVerifiedAt: r.QRVerifiedAt, ActivationStatus: activation}, nil
+	return ReservationAccess{View: view, CanReschedule: s.canReschedule(r), ReservationNumber: r.Number(), ReservationDate: r.StartTime.In(Location).Format("2006-01-02"), ID: r.ID, Code: ConfirmationCode(r), SlotID: r.SlotID, SlotLabel: sl.DisplayLabel(), StartTime: r.StartTime, EndTime: r.EndTime, Duration: r.DurationMinutes, Status: r.Status, CanVerifyQR: reason == "ready", ActivationReason: reason, QRVerifiedAt: r.QRVerifiedAt, ActivationStatus: view.Status}, nil
 }
 func (s *Service) LookupCode(ctx context.Context, code string, dates ...string) (ReservationAccess, error) {
 	db := s.DB.WithContext(ctx)
@@ -252,6 +253,9 @@ func (s *Service) VerifySlotQR(ctx context.Context, code, qr string, dates ...st
 		result, err = s.access(tx, r)
 		if err != nil {
 			return err
+		}
+		if r.QRVerifiedAt != nil && r.Status == "confirmed" && (s.Now().Before(r.EndTime) || result.State == "running" || result.State == "communication_lost" || result.State == "recovering" || result.State == "pending_recovery") {
+			return nil
 		}
 		if !result.CanVerifyQR {
 			return ErrConflict

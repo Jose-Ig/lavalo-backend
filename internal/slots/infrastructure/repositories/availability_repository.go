@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"github.com/Jose-Ig/lavalo-backend/internal/operations"
 	"time"
 
 	reservationModels "github.com/Jose-Ig/lavalo-backend/internal/reservations/domain/models"
@@ -48,5 +49,13 @@ func (r *AvailabilityRepository) FindReservationsByDateRange(ctx context.Context
 		return nil, err
 	}
 
+	// Include operational intervals without changing commercial reservation data.
+	var sessions []operations.Session
+	if err := r.db.WithContext(ctx).Where("state IN ? AND start_ms < ? AND (end_ms + extra_ms) > ?", []string{operations.Running, operations.Recovering, operations.Lost}, end.UnixMilli(), start.UnixMilli()).Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+	for _, session := range sessions {
+		reservations = append(reservations, reservationModels.Reservation{SlotID: session.SlotID, StartTime: time.UnixMilli(session.StartMS), EndTime: time.UnixMilli(session.EndMS + session.ExtraMS), Status: reservationModels.ReservationStatusConfirmed})
+	}
 	return reservations, nil
 }

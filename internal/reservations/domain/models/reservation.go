@@ -23,6 +23,7 @@ type Reservation struct {
 	LastName            string            `gorm:"type:varchar(100)" json:"last_name,omitempty"`
 	PhoneAreaCode       string            `gorm:"type:varchar(4)" json:"phone_area_code,omitempty"`
 	ParentReservationID *uint             `gorm:"index" json:"parent_reservation_id,omitempty"`
+	ParentExecutionID   string            `gorm:"size:36" json:"-"`
 	CodeVersion         int               `gorm:"not null;default:0" json:"-"`
 	CodeNonce           int               `gorm:"not null;default:0" json:"-"`
 	CodeHash            *string           `gorm:"uniqueIndex" json:"-"`

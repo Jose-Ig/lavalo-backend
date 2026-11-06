@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"github.com/Jose-Ig/lavalo-backend/internal/operations"
 	reservation "github.com/Jose-Ig/lavalo-backend/internal/reservations/domain/models"
 	slot "github.com/Jose-Ig/lavalo-backend/internal/slots/domain/models"
 	"gorm.io/gorm"
@@ -15,14 +16,19 @@ type ExtensionOption struct {
 	AmountCents int64 `json:"amount_cents"`
 }
 
-func (s *Service) extensionAllowed(r reservation.Reservation) bool {
-	return r.ParentReservationID == nil && r.Status == "confirmed" && r.QRVerifiedAt != nil && !s.Now().Before(r.StartTime) && s.Now().Before(r.EndTime)
+func (s *Service) extensionAllowed(db *gorm.DB, r reservation.Reservation) (bool, error) {
+	_, allowed, err := operations.ExtensionClock(db, r, s.Now())
+	return r.ParentReservationID == nil && r.Status == "confirmed" && r.QRVerifiedAt != nil && !s.Now().Before(r.StartTime) && allowed, err
 }
 func (s *Service) extensionFree(tx *gorm.DB, r reservation.Reservation, minutes int) (bool, error) {
 	if minutes != 3 && minutes != 15 && minutes != 30 && minutes != 60 {
 		return false, ErrInvalid
 	}
-	end := r.EndTime.Add(time.Duration(minutes) * time.Minute)
+	effective, allowed, err := operations.ExtensionClock(tx, r, s.Now())
+	if err != nil || !allowed {
+		return false, err
+	}
+	end := effective.Add(time.Duration(minutes) * time.Minute)
 	local := r.StartTime.In(Location)
 	if end.After(time.Date(local.Year(), local.Month(), local.Day(), 23, 59, 0, 0, Location)) {
 		return false, nil
@@ -34,7 +40,7 @@ func (s *Service) extensionFree(tx *gorm.DB, r reservation.Reservation, minutes 
 	if !sl.IsAvailable {
 		return false, nil
 	}
-	busy, err := s.busy(tx, r.SlotID, r.EndTime, end)
+	busy, err := s.busy(tx, r.SlotID, effective, end)
 	return !busy, err
 }
 func (s *Service) ExtensionOptions(ctx context.Context, code, date string) ([]ExtensionOption, error) {
@@ -47,7 +53,11 @@ func (s *Service) ExtensionOptions(ctx context.Context, code, date string) ([]Ex
 	if err != nil {
 		return nil, err
 	}
-	if !s.extensionAllowed(r) {
+	allowed, err := s.extensionAllowed(tx, r)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
 		return nil, ErrConflict
 	}
 	result := []ExtensionOption{}
@@ -93,7 +103,11 @@ func (s *Service) CreateExtension(ctx context.Context, code, date string, minute
 		if err != nil {
 			return err
 		}
-		if r.SlotID != original.SlotID || !s.extensionAllowed(r) {
+		allowed, err := s.extensionAllowed(tx, r)
+		if err != nil {
+			return err
+		}
+		if r.SlotID != original.SlotID || !allowed {
 			return ErrConflict
 		}
 		free, err := s.extensionFree(tx, r, minutes)
@@ -103,11 +117,22 @@ func (s *Service) CreateExtension(ctx context.Context, code, date string, minute
 		if !free {
 			return ErrConflict
 		}
-		expiry := s.Now().Add(10 * time.Minute)
-		if expiry.After(r.EndTime) {
-			expiry = r.EndTime
+		effective, _, err := operations.ExtensionClock(tx, r, s.Now())
+		if err != nil {
+			return err
 		}
-		child = reservation.Reservation{ParentReservationID: &r.ID, SlotID: r.SlotID, StartTime: r.EndTime, EndTime: r.EndTime.Add(time.Duration(minutes) * time.Minute), DurationMinutes: minutes, Name: r.Name, FirstName: r.FirstName, LastName: r.LastName, PhoneAreaCode: r.PhoneAreaCode, Phone: r.Phone, Email: r.Email, AccessTokenHash: tokenHash(token), ExpiresAt: &expiry, Status: "pending"}
+		expiry := s.Now().Add(10 * time.Minute)
+		if expiry.After(effective) {
+			expiry = effective
+		}
+		child = reservation.Reservation{ParentReservationID: &r.ID, SlotID: r.SlotID, StartTime: effective, EndTime: effective.Add(time.Duration(minutes) * time.Minute), DurationMinutes: minutes, Name: r.Name, FirstName: r.FirstName, LastName: r.LastName, PhoneAreaCode: r.PhoneAreaCode, Phone: r.Phone, Email: r.Email, AccessTokenHash: tokenHash(token), ExpiresAt: &expiry, Status: "pending"}
+		session, found, err := operations.Find(tx, r.ID)
+		if err != nil {
+			return err
+		}
+		if found {
+			child.ParentExecutionID = session.ExecutionID
+		}
 		return tx.Create(&child).Error
 	})
 	return &child, token, err

@@ -2,6 +2,7 @@ package bookings
 
 import (
 	"context"
+	"github.com/Jose-Ig/lavalo-backend/internal/operations"
 	reservation "github.com/Jose-Ig/lavalo-backend/internal/reservations/domain/models"
 	slot "github.com/Jose-Ig/lavalo-backend/internal/slots/domain/models"
 	"gorm.io/gorm"
@@ -18,7 +19,10 @@ func (s *Service) rescheduleInput(r reservation.Reservation, slotID uint, start 
 func (s *Service) rescheduleBusy(db *gorm.DB, r reservation.Reservation, slotID uint, start time.Time) (bool, error) {
 	var count int64
 	err := db.Model(&reservation.Reservation{}).Where("id <> ? AND slot_id = ? AND start_time < ? AND end_time > ?", r.ID, slotID, start.Add(time.Duration(r.DurationMinutes)*time.Minute).UTC(), start.UTC()).Where("status = ? OR (status = ? AND (expires_at IS NULL OR expires_at > ?))", "confirmed", "pending", s.Now()).Count(&count).Error
-	return count > 0, err
+	if err != nil || count > 0 {
+		return count > 0, err
+	}
+	return operations.Occupied(db, slotID, r.ID, start, start.Add(time.Duration(r.DurationMinutes)*time.Minute), s.Now())
 }
 func (s *Service) RescheduleAvailability(ctx context.Context, code, date string, start time.Time) ([]slot.Slot, error) {
 	day, err := s.lookupDay([]string{date})

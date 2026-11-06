@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Jose-Ig/lavalo-backend/internal/operations"
 	"log"
 	"net/http"
 	"strconv"
@@ -228,7 +229,24 @@ func (s *Service) Apply(ctx context.Context, o Order) error {
 				if e != nil {
 					return e
 				}
-				if overlaps > 0 {
+				busy, err := operations.Occupied(tx, r.SlotID, r.ID, r.StartTime, r.EndTime, s.Now())
+				if err != nil {
+					return err
+				}
+				if r.ParentReservationID != nil {
+					// A child extends its own parent's execution, not a competing reservation.
+					var own operations.Session
+					if err := tx.Where("reservation_id = ?", *r.ParentReservationID).First(&own).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+						return err
+					}
+					if own.ID != "" {
+						busy, err = operations.Occupied(tx, r.SlotID, *r.ParentReservationID, r.StartTime, r.EndTime, s.Now())
+						if err != nil {
+							return err
+						}
+					}
+				}
+				if overlaps > 0 || busy {
 					state = "review"
 					issue = "slot_unavailable"
 					break
@@ -242,11 +260,35 @@ func (s *Service) Apply(ctx context.Context, o Order) error {
 					if e := tx.First(&enabledSlot, r.SlotID).Error; e != nil {
 						return e
 					}
-					if !enabledSlot.IsAvailable || parent.Status != "confirmed" || parent.QRVerifiedAt == nil || parent.SlotID != r.SlotID || !parent.EndTime.Equal(r.StartTime) || !s.Now().Before(parent.EndTime) {
+					effective, extensionAllowed, err := operations.ExtensionClock(tx, parent, s.Now())
+					if err != nil {
+						return err
+					}
+					matchesExecution := effective.Equal(r.StartTime)
+					session, found, err := operations.Find(tx, parent.ID)
+					if err != nil {
+						return err
+					}
+					if found && !operations.Terminal(session.State) {
+						// The purchase was initiated while connected; a subsequent
+						// outage does not discard its newly confirmed minutes.
+						extensionAllowed = session.ExtraMS == 0
+						if r.ParentExecutionID != "" {
+							var count int64
+							if err := tx.Model(&operations.Execution{}).Where("id = ? AND session_id = ?", r.ParentExecutionID, session.ID).Count(&count).Error; err != nil {
+								return err
+							}
+							matchesExecution = count == 1
+						}
+					}
+					if !extensionAllowed || !matchesExecution || !enabledSlot.IsAvailable || parent.Status != "confirmed" || parent.QRVerifiedAt == nil || parent.SlotID != r.SlotID || !s.Now().Before(effective) {
 						state, issue = "review", "extension_unavailable"
 						break
 					}
-					if e := tx.Model(&parent).Updates(map[string]any{"end_time": r.EndTime, "duration_minutes": parent.DurationMinutes + r.DurationMinutes}).Error; e != nil {
+					if e := tx.Model(&parent).Updates(map[string]any{"end_time": parent.EndTime.Add(time.Duration(r.DurationMinutes) * time.Minute), "duration_minutes": parent.DurationMinutes + r.DurationMinutes}).Error; e != nil {
+						return e
+					}
+					if e := operations.AddPaidTime(tx, parent.ID, r.DurationMinutes); e != nil {
 						return e
 					}
 					r.Status = "completed"

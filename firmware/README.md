@@ -1,16 +1,18 @@
-# Uash: primer controlador HTTPS (MVP de dos LED)
+# Uash: controlador HTTPS con recuperación de tiempo (protocolo 2)
+
+La especificación vigente, el despliegue y las pruebas están en [recuperación del controlador](../docs/controller-recovery.md). Backend, app y firmware deben actualizarse juntos.
 
 La placa consulta directamente al backend cada 2,5 segundos, más el tiempo de cada petición. No requiere broker MQTT ni otra cuenta. Este paquete es para el circuito de dos LED ya probado: P25 y P26, una resistencia de 1 kΩ por LED y GND compartido. No conectar máquinas ni tomas de red a la protoboard.
 
 ## Qué ya está preparado y qué falta
 
-El backend incorpora `/api/v1/controllers/poll` y `/api/v1/controllers/ack`, ambos POST y autenticados con `Authorization: Bearer <token del dispositivo>`. Los cambios todavía deben desplegarse. El ESP32 arranca apagado y sólo enciende tras una autorización HTTPS válida para una reserva confirmada, con QR validado, espacio habilitado y horario vigente. No hay un botón público de encendido manual.
+El backend incorpora `/api/v1/controllers/bootstrap`, `/api/v1/controllers/poll` y `/api/v1/controllers/ack`, todos POST y autenticados con `Authorization: Bearer <token del dispositivo>`. Los cambios todavía deben desplegarse. El ESP32 arranca apagado y sólo enciende tras una autorización HTTPS válida para una reserva confirmada, con QR validado, espacio habilitado y horario vigente. No hay un botón público de encendido manual.
 
 La app muestra Activando hasta recibir una confirmación reciente. El reconocimiento sólo confirma las salidas GPIO; no mide tensión en el toma ni confirma que un motor funcione. Si pierde comunicación, la app deja de afirmar que el equipo está activo. El ESP32 conserva la hora de corte ya autorizada aunque falle Internet; no necesita la app abierta ni la notebook encendida.
 
 ## Paso 1: publicar el backend y actualizar la app
 
-Desplegar los cambios del backend. El arranque aplica AutoMigrate y crea la tabla `devices` (no cambia UUIDs de espacios). Actualizar la app con los nuevos estados del controlador. No cambiar credenciales de Mercado Pago.
+Desplegar los cambios del backend. El arranque aplica AutoMigrate y crea/actualiza `devices`, `sessions`, `executions`, `incidents` y `boots` (no cambia UUIDs de espacios). Actualizar la app con los nuevos estados del controlador. No cambiar credenciales de Mercado Pago.
 
 Los espacios sin un controlador registrado conservan el modo de simulación anterior. Los que tienen controlador registrado esperan una confirmación real de la placa. Registrar una placa mientras exista un turno ya escaneado y vigente puede habilitar sus LED en cuanto consulte: realizar el registro con el espacio libre.
 
@@ -79,13 +81,13 @@ No hace falta cambiar la instalación eléctrica del circuito de LED. Para cambi
 6. Comprar tiempo adicional sólo si hay disponibilidad. El fin cambia cuando Mercado Pago confirma el pago. La placa recibe una nueva versión de la autorización y actualiza el corte; la app espera la nueva confirmación.
 7. Al terminar el horario autorizado, ambas luces se apagan por un temporizador local independiente de las peticiones de red.
 
-La app sigue usando el final programado de la reserva; escanear tarde no entrega una duración nueva completa. Volver a escanear o consultar no reinicia el temporizador. Una compra pendiente no agrega minutos. Las respuestas no incluyen código de reserva, nombre, teléfono ni email.
+Al activar inicialmente, se usa el final programado de la reserva; escanear tarde no entrega una duración nueva completa. Después de un reinicio se puede autorizar un vencimiento operativo nuevo para el tiempo pendiente, si no invade otra reserva. Volver a escanear o consultar no reinicia el temporizador. Una compra pendiente no agrega minutos. Las respuestas no incluyen código de reserva, nombre, teléfono ni email.
 
 ## Pruebas de fallo
 
 - Cerrar la app: las luces continúan hasta el corte autorizado.
 - Cortar Internet durante un turno: la placa conserva el corte previamente autorizado. Una ampliación todavía no recibida no puede aplicarse offline.
-- Reiniciar la placa: las salidas arrancan apagadas; para volver a encender necesita sincronizar el reloj y obtener una autorización nueva vigente. El backend invalida la confirmación del arranque anterior.
+- Reiniciar la placa: las salidas arrancan apagadas; consulta bootstrap con su registro persistido. Recupera el tiempo pendiente cuando el backend autoriza la continuación. Los arranques anteriores quedan invalidados.
 - QR de otro espacio, turno fuera de horario o pago pendiente: no habilitan.
 - Token inválido o dispositivo deshabilitado: una respuesta 401/403 apaga las salidas. Si la placa está offline, la revocación sólo llega al reconectar; conserva el corte local anterior.
 - Si el firmware no conecta: revisar el Monitor serie. 404 puede indicar que aún no se desplegaron las rutas; 401 indica un problema de credencial/registro; 409 indica una orden que cambió y obliga a consultar nuevamente. No enviar `secrets.h` ni tokens al pedir ayuda.
@@ -114,4 +116,4 @@ c++ -std=c++11 firmware/tests/deadline_test.cpp -o /tmp/uash-deadline-test
 /tmp/uash-deadline-test
 ```
 
-La exactitud respecto de la app depende también de los relojes del teléfono y del ESP32; mantener fecha y hora automáticas en el teléfono. No se agrega una tolerancia fija de segundos al fin de la reserva.
+La app corrige su referencia temporal con el servidor y el ESP32 usa NTP para convertir el vencimiento operativo a un plazo monotónico. La latencia y la precisión de los registros persistidos siguen siendo relevantes. No se agrega una tolerancia fija de segundos al fin de la reserva.
